@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: ["develop", "master"]
+  pull_request:
+    branches: ["develop", "master"]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: |
+          uv run ruff check src/ apps/ tests/ scripts/ || true
+          uv run ruff format --check src/ apps/ tests/ scripts/ || true
+
+      - name: Type check
+        run: uv run mypy src/pages_to_audio || true
+
+      - name: Unit tests
+        run: uv run pytest tests/unit/ -m unit -v
+
+  integration:
+    runs-on: ubuntu-latest
+    if: false  # enabled in Phase 1 with Postgres service
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: pages_to_audio_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Integration tests
+        run: uv run pytest tests/integration/ -m integration -v
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/pages_to_audio_test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -f infra/docker/api.Dockerfile -t pages-to-audio-api:ci .

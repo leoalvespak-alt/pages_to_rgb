@@ -1,0 +1,1 @@
+Placeholder: run 'gradle wrapper --gradle-version 8.6' to generate gradle-wrapper.jar if missing. This scaffold does not bundle the JAR to keep repo small.

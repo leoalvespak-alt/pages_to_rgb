@@ -1,0 +1,6 @@
+tunnel: <TUNNEL_ID pages-to-rgb-wsl2>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: ptr.rotadeataque.com.br
+    service: http://localhost:8080
+  - service: http_status:404

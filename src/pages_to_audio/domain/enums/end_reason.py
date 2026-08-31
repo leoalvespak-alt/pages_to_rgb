@@ -1,0 +1,10 @@
+from enum import StrEnum
+
+
+class EndReason(StrEnum):
+    EXPECTED_PAGES_REACHED = "EXPECTED_PAGES_REACHED"
+    MANUAL = "MANUAL"
+    VISUAL_MARKER = "VISUAL_MARKER"
+    OPEN_HAND = "OPEN_HAND"
+    HARD_IDLE = "HARD_IDLE"
+    ADMIN_CANCEL = "ADMIN_CANCEL"

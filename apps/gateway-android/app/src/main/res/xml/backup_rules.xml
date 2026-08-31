@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Exclude spool — Room + JPEG spool é efêmero e recriado -->
+    <exclude domain="file" path="spool/" />
+    <exclude domain="database" path="gateway_spool.db" />
+</full-backup-content>

@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: pages_to_audio
+      POSTGRES_USER: pages_to_audio
+      POSTGRES_PASSWORD: pages_to_audio_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pages-to-audio-postgres:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pages_to_audio -d pages_to_audio"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql12
+      DB_PORT: 5432
+      DBNAME: temporal
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal_dev
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    restart: unless-stopped
+
+  pages-migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pages_to_audio:pages_to_audio_dev@postgres:5432/pages_to_audio
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  pages-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      pages-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:18180:8000"
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pages_to_audio:pages_to_audio_dev@postgres:5432/pages_to_audio
+      TEMPORAL_ADDRESS: temporal:7233
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  pages-worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      pages-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pages_to_audio:pages_to_audio_dev@postgres:5432/pages_to_audio
+      TEMPORAL_ADDRESS: temporal:7233
+    command: ["python", "-m", "src.pages_to_audio.workflows.worker"]
+    restart: unless-stopped
+
+volumes:
+  pages-to-audio-postgres:

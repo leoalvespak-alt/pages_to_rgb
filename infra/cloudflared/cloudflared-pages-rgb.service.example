@@ -1,0 +1,13 @@
+[Unit]
+Description=Cloudflare Tunnel — pages-to-rgb-wsl2 (ptr.rotadeataque.com.br)
+After=network.target
+
+[Service]
+Type=simple
+User=leonardo
+ExecStart=/usr/bin/cloudflared tunnel --config /etc/cloudflared/pages-rgb.yml run
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

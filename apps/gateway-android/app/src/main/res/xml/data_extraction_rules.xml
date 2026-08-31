@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="spool/" />
+        <exclude domain="database" path="gateway_spool.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="spool/" />
+        <exclude domain="database" path="gateway_spool.db" />
+    </device-transfer>
+</data-extraction-rules>

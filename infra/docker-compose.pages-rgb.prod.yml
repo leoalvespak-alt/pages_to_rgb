@@ -1,0 +1,61 @@
+services:
+  pages-rgb-app:
+    image: ghcr.io/leoalvespak-alt/pages_to_rgb:${IMAGE_TAG:-latest}
+    container_name: pages-rgb-app
+    restart: unless-stopped
+    env_file:
+      - /srv/pages-to-rgb/config/.env.pages-rgb
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      STORAGE_PROVIDER: r2
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_ENDPOINT: ${R2_ENDPOINT}
+      R2_BUCKET_ORIGINALS: ${R2_BUCKET_ORIGINALS:-pages-to-rgb-originals}
+      R2_BUCKET_DERIVED: ${R2_BUCKET_DERIVED:-pages-to-rgb-derived}
+      R2_BUCKET_OCR_RAW: ${R2_BUCKET_OCR_RAW:-pages-to-rgb-ocr}
+      R2_BUCKET_AUDIO: ${R2_BUCKET_AUDIO:-pages-to-rgb-audio}
+      ANDROID_GATEWAY_TOKEN: ${ANDROID_GATEWAY_TOKEN}
+      ANDROID_GATEWAY_TOKEN_PREVIOUS: ${ANDROID_GATEWAY_TOKEN_PREVIOUS:-}
+      DEVICE_HMAC_MASTER_KEY: ${DEVICE_HMAC_MASTER_KEY}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - pages_rgb_net
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  pages-rgb-caddy:
+    image: caddy:2-alpine
+    container_name: pages-rgb-caddy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./Caddyfile.pages-rgb:/etc/caddy/Caddyfile:ro
+      - pages_rgb_caddy_data:/data
+      - pages_rgb_caddy_config:/config
+    depends_on:
+      pages-rgb-app:
+        condition: service_healthy
+    networks:
+      - pages_rgb_net
+
+networks:
+  pages_rgb_net:
+    name: pages_rgb_net
+
+volumes:
+  pages_rgb_caddy_data:
+    name: pages_rgb_caddy_data
+  pages_rgb_caddy_config:
+    name: pages_rgb_caddy_config

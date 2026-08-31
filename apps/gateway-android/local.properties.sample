@@ -1,0 +1,6 @@
+sdk.dir=C\:\\Android\\Sdk
+# ou %LOCALAPPDATA%\\Android\\Sdk
+# gateway config
+gateway.baseUrl=https://SEU_VPS/api/v1/
+gateway.deviceId=GW-ANDROID-001
+gateway.deviceSecret=COLE_SEU_SECRET_AQUI
