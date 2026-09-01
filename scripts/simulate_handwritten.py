@@ -108,9 +108,9 @@ def run_simulation(base_url: str, words: list[str] | None = None) -> None:
                 "X-Orientation": "0",
             },
         )
-        print(
-            f"  frame {idx} word={word} -> {resp.status_code} {'dup' if resp.json().get('duplicate') else 'ok' if resp.status_code == 200 else resp.text}"
-        )
+        dup = resp.json().get("duplicate")
+        status = "dup" if dup else "ok" if resp.status_code == 200 else resp.text
+        print(f"  frame {idx} word={word} -> {resp.status_code} {status}")  # noqa: E501
     r = client.post(
         f"/handwritten/session/{session_id}/capture-complete",
         params={"capture_id": capture_id, "received_frames": len(words)},
@@ -125,7 +125,7 @@ def run_simulation(base_url: str, words: list[str] | None = None) -> None:
     print(f"publish-rgb: {r.status_code} {r.text}")
     if r.status_code == 200 and r.json().get("sequence_id"):
         seq_id = r.json()["sequence_id"]
-        # try get rgb sequence via gateway? handwritten uses same publisher table, but endpoint for rgb is via gateway? For now use handwritten summary
+        # handwritten uses same table, rgb via summary
         print(f"sequence_id: {seq_id}")
 
 
