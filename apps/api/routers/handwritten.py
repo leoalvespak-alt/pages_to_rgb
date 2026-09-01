@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from apps.api.dependencies import SettingsDep, UowDep
+from src.pages_to_audio.admin.settings_service import get_effective_admin_settings, rgb_for_answer
 from src.pages_to_audio.auth.gateway import verify_gateway_token
 from src.pages_to_audio.capture.policy import CapturePolicy, build_capture_policy
 from src.pages_to_audio.common.errors import AppError, FrameConflictError, InvalidStateTransition
@@ -64,17 +65,6 @@ async def handwritten_start(
     uow: UowDep,
 ) -> HandwrittenSessionStartResponse:
     """Create HANDWRITTEN_WORD session — 10 fotos, 10 palavras, paleta palavra→cor."""
-    # Fixed 10 for handwritten test; allow override but default 10
-    ep = body.expected_pages if body.expected_pages is not None else 10
-    eq = body.expected_questions if body.expected_questions is not None else 10
-    if body.expected_words is not None:
-        ep = body.expected_words
-        eq = body.expected_words
-    mr = (
-        body.minimum_ratio
-        if body.minimum_ratio is not None
-        else settings.capture_defaults.MINIMUM_RATIO
-    )
     # Force ANDROID_CAMERA for handwritten (só câmera)
     capture_source = "ANDROID_CAMERA"
 
@@ -110,6 +100,23 @@ async def handwritten_start(
     gateway.last_seen_at = datetime.now(UTC)
     device.last_seen_at = datetime.now(UTC)
 
+    admin_settings = await get_effective_admin_settings(uow.session)
+    # Dedicated global for handwritten; explicit values remain for client compatibility.
+    ep = (
+        body.expected_pages
+        if body.expected_pages is not None
+        else admin_settings.handwritten_expected_questions
+    )
+    eq = (
+        body.expected_questions
+        if body.expected_questions is not None
+        else admin_settings.handwritten_expected_questions
+    )
+    if body.expected_words is not None:
+        ep = body.expected_words
+        eq = body.expected_words
+    mr = body.minimum_ratio if body.minimum_ratio is not None else admin_settings.minimum_ratio
+
     session_id = new_public_id()
     now = datetime.now(UTC)
     session = Session(
@@ -123,6 +130,19 @@ async def handwritten_start(
         capture_started_at=now,
         capture_source=capture_source,
         session_type="HANDWRITTEN_WORD",
+        config_snapshot={
+            **admin_settings.snapshot("HANDWRITTEN_WORD"),
+            "expected_pages": ep,
+            "expected_questions": eq,
+            "minimum_ratio": mr,
+        },
+        provider_snapshot={
+            "settings_version": admin_settings.version,
+            "ocr_provider": admin_settings.ocr_provider,
+            "solve_model": admin_settings.solve_model,
+            "verify_model": admin_settings.verify_model,
+            "arbiter_model": admin_settings.arbiter_model,
+        },
     )
     uow.session.add(session)
     await uow.session.flush()
@@ -523,7 +543,6 @@ async def handwritten_summary(
     from src.pages_to_audio.db.models.question import Question
     from src.pages_to_audio.db.models.rgb_sequence import RgbSequence
     from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
-    from src.pages_to_audio.rgb.policy import HANDWRITTEN_PALETTE
 
     session = await uow.session.scalar(
         select(Session)
@@ -559,8 +578,8 @@ async def handwritten_summary(
         letter = final.answer if final is not None else None
         color = None
         if letter in {"A", "B", "C", "D", "E"}:
-            rgb = HANDWRITTEN_PALETTE[letter].rgb  # type: ignore[index]
-            color = {"rgb": list(rgb), "letter": letter}
+            rgb = rgb_for_answer(session.config_snapshot, "HANDWRITTEN_WORD", letter)
+            color = {"rgb": rgb, "letter": letter}
         answers.append(
             {
                 "question_number": question.question_number,
@@ -594,13 +613,18 @@ async def handwritten_summary(
         "expected_questions": session.expected_questions,
         "expected_words": session.expected_questions,
         "minimum_ratio": float(session.minimum_ratio),
+        "settings_version": (session.config_snapshot or {}).get("settings_version", 0),
+        "rgb_defaults": {
+            key: (session.config_snapshot or {}).get(key)
+            for key in ("brightness_percent", "on_ms", "off_ms")
+        },
         "capture_source": getattr(session, "capture_source", "ANDROID_CAMERA"),
         "created_at": session.created_at.isoformat() if session.created_at else None,
         "capture_locked_at": session.capture_locked_at.isoformat()
         if session.capture_locked_at
         else None,
-        "processing_started_at": getattr(session, "processing_started_at", None).isoformat()
-        if getattr(session, "processing_started_at", None)
+        "processing_started_at": session.processing_started_at.isoformat()
+        if session.processing_started_at is not None
         else None,
         "device_code": device.device_code,
         "gateway_code": gateway.gateway_code,

@@ -33,9 +33,13 @@ class TemporalWorkflowStarter:
             return self._client
         return await get_temporal_client()
 
-    async def start_process_exam(self, session_public_id: str) -> None:
+    async def start_process_exam(
+        self, session_public_id: str, *, operation_suffix: str | None = None
+    ) -> None:
         client = await self._get_client()
         wf_id = _workflow_id(session_public_id)
+        if operation_suffix:
+            wf_id = f"{wf_id}-retry-{operation_suffix}"
         try:
             handle = await client.start_workflow(
                 ProcessExamWorkflow.run,

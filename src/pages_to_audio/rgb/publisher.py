@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,8 @@ from src.pages_to_audio.rgb.policy import (
     validate_complete_answer_set,
 )
 from src.pages_to_audio.rgb.schemas import (
+    AnswerLetter,
+    RgbColor,
     RgbDefaults,
     RgbResultCommand,
     RgbSequenceStatus,
@@ -66,13 +69,33 @@ async def _internal_binding(db: AsyncSession, session_public_id: str) -> Session
     return SessionBinding(session=session, device=device, gateway=gateway)
 
 
-def _defaults() -> RgbDefaults:
+def _defaults(snapshot: dict[str, Any] | None = None) -> RgbDefaults:
     settings = get_settings()
+    data = snapshot or {}
     return RgbDefaults(
-        brightness_percent=settings.RGB_DEFAULT_BRIGHTNESS_PERCENT,
-        on_ms=settings.RGB_DEFAULT_ON_MS,
-        off_ms=settings.RGB_DEFAULT_OFF_MS,
+        brightness_percent=int(
+            data.get("brightness_percent", settings.RGB_DEFAULT_BRIGHTNESS_PERCENT)
+        ),
+        on_ms=int(data.get("on_ms", settings.RGB_DEFAULT_ON_MS)),
+        off_ms=int(data.get("off_ms", settings.RGB_DEFAULT_OFF_MS)),
     )
+
+
+def _snapshot_palette(session: Session) -> dict[AnswerLetter, RgbColor]:
+    session_type = session.session_type or "EXAM"
+    fallback = HANDWRITTEN_PALETTE if session_type == "HANDWRITTEN_WORD" else DEFAULT_PALETTE
+    snapshot = session.config_snapshot or {}
+    key = "handwritten_palette" if session_type == "HANDWRITTEN_WORD" else "palette"
+    raw = snapshot.get(key)
+    if not isinstance(raw, dict) or set(raw) != set("ABCDE"):
+        return {letter: color.model_copy(deep=True) for letter, color in fallback.items()}
+    try:
+        palette = {
+            letter: RgbColor(rgb=tuple(raw[letter]["rgb"])) for letter in ("A", "B", "C", "D", "E")
+        }
+        return cast(dict[AnswerLetter, RgbColor], palette)
+    except (KeyError, TypeError, ValueError):
+        return {letter: color.model_copy(deep=True) for letter, color in fallback.items()}
 
 
 async def mark_processing_for_session(
@@ -180,11 +203,9 @@ async def publish_rgb_for_session(
             reused=False,
         )
 
-    defaults = _defaults()
+    defaults = _defaults(binding.session.config_snapshot)
     # Isolated palette selection — HANDWRITTEN_WORD does not touch EXAM
-    session_type = getattr(binding.session, "session_type", "EXAM") or "EXAM"
-    base_palette = HANDWRITTEN_PALETTE if session_type == "HANDWRITTEN_WORD" else DEFAULT_PALETTE
-    palette = {letter: color.model_copy(deep=True) for letter, color in base_palette.items()}
+    palette = _snapshot_palette(binding.session)
     probe_payload, _ = build_payload(
         session_id=binding.session.public_id,
         sequence_id="rgb-probe",

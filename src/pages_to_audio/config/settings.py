@@ -54,6 +54,10 @@ class AppSettings(BaseSettings):
     ADMIN_PASSWORD_HASH: str = ""
     SESSION_SECRET: SecretStr = SecretStr("")
     CSRF_SECRET: SecretStr = SecretStr("")
+    ADMIN_SETTINGS_ENCRYPTION_KEY: SecretStr = SecretStr("")
+    ADMIN_SESSION_TTL_DAYS: int = 30
+    ADMIN_LOGIN_MAX_ATTEMPTS: int = 5
+    ADMIN_LOGIN_WINDOW_SECONDS: int = 300
     ANDROID_GATEWAY_TOKEN: SecretStr = SecretStr("")
     ANDROID_GATEWAY_TOKEN_PREVIOUS: SecretStr = SecretStr("")
     DEVICE_HMAC_MASTER_KEY: SecretStr = SecretStr("")
@@ -76,6 +80,10 @@ class AppSettings(BaseSettings):
     DEEPSEEK_MODEL: str = "deepseek-v4-pro"
     DEEPSEEK_FALLBACK_ENABLED: bool = True
     DEEPSEEK_CROSSCHECK_ON_HIGH_RISK: bool = False
+
+    # Additional model providers configurable by the admin
+    GEMINI_API_KEY: SecretStr = SecretStr("")
+    GLM_API_KEY: SecretStr = SecretStr("")
 
     # OCR
     GOOGLE_DOCUMENT_AI_PROJECT_ID: str = ""
@@ -202,7 +210,10 @@ class AppSettings(BaseSettings):
             return self
         required: dict[str, str] = {
             "DATABASE_URL": self.DATABASE_URL.get_secret_value(),
+            "ADMIN_PASSWORD_HASH": self.ADMIN_PASSWORD_HASH,
             "SESSION_SECRET": self.SESSION_SECRET.get_secret_value(),
+            "CSRF_SECRET": self.CSRF_SECRET.get_secret_value(),
+            "ADMIN_SETTINGS_ENCRYPTION_KEY": self.ADMIN_SETTINGS_ENCRYPTION_KEY.get_secret_value(),
             "TEMPORAL_ADDRESS": self.TEMPORAL_ADDRESS,
         }
         if self.STORAGE_PROVIDER == "supabase":

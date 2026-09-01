@@ -70,3 +70,32 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -f infra/docker/api.Dockerfile -t pages-to-audio-api:ci .
+
+  admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/admin/package-lock.json
+      - run: npm ci
+        working-directory: apps/admin
+      - run: npm run typecheck
+        working-directory: apps/admin
+      - run: npm run build
+        working-directory: apps/admin
+      - run: docker build -f infra/docker/Dockerfile.admin -t pages-to-audio-admin:ci .
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+        working-directory: apps/gateway-android

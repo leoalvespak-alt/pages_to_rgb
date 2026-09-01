@@ -5,7 +5,12 @@
 :80 {
 	@ptr host ptr.rotadeataque.com.br
 	handle @ptr {
-		reverse_proxy pages-rgb-app:8000
+		handle /admin* { reverse_proxy admin:3000 }
+		handle /_next/* { reverse_proxy admin:3000 }
+		handle /api/* { reverse_proxy pages-rgb-app:8000 }
+		handle /docs* { reverse_proxy pages-rgb-app:8000 }
+		handle /openapi.json { reverse_proxy pages-rgb-app:8000 }
+		handle { reverse_proxy pages-rgb-app:8000 }
 	}
 	handle {
 		respond "pages-to-rgb health" 200

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from apps.api.dependencies import SettingsDep, UowDep
+from src.pages_to_audio.admin.settings_service import get_effective_admin_settings, rgb_for_answer
 from src.pages_to_audio.auth.gateway import verify_gateway_token
 from src.pages_to_audio.capture.policy import CapturePolicy, build_capture_policy
 from src.pages_to_audio.common.errors import AppError, FrameConflictError, InvalidStateTransition
@@ -124,22 +125,6 @@ async def session_start(
     uow: UowDep,
 ) -> SessionStartResponse:
     """Create or resume a capture session (idempotent)."""
-    ep = (
-        body.expected_pages
-        if body.expected_pages is not None
-        else settings.capture_defaults.EXPECTED_PAGES
-    )
-    eq = (
-        body.expected_questions
-        if body.expected_questions is not None
-        else settings.capture_defaults.EXPECTED_QUESTIONS
-    )
-    mr = (
-        body.minimum_ratio
-        if body.minimum_ratio is not None
-        else settings.capture_defaults.MINIMUM_RATIO
-    )
-
     gateway = await uow.session.scalar(
         select(AndroidGateway).where(AndroidGateway.gateway_code == gateway_id).with_for_update()
     )
@@ -172,6 +157,15 @@ async def session_start(
 
     gateway.last_seen_at = datetime.now(UTC)
     device.last_seen_at = datetime.now(UTC)
+
+    admin_settings = await get_effective_admin_settings(uow.session)
+    ep = body.expected_pages if body.expected_pages is not None else admin_settings.expected_pages
+    eq = (
+        body.expected_questions
+        if body.expected_questions is not None
+        else admin_settings.expected_questions
+    )
+    mr = body.minimum_ratio if body.minimum_ratio is not None else admin_settings.minimum_ratio
 
     # Handle allow_new_session=false → only resume existing CAPTURING session
     if not body.allow_new_session:
@@ -238,6 +232,19 @@ async def session_start(
         capture_started_at=now,
         capture_source=body.capture_source,
         session_type="EXAM",
+        config_snapshot={
+            **admin_settings.snapshot("EXAM"),
+            "expected_pages": ep,
+            "expected_questions": eq,
+            "minimum_ratio": mr,
+        },
+        provider_snapshot={
+            "settings_version": admin_settings.version,
+            "ocr_provider": admin_settings.ocr_provider,
+            "solve_model": admin_settings.solve_model,
+            "verify_model": admin_settings.verify_model,
+            "arbiter_model": admin_settings.arbiter_model,
+        },
     )
     uow.session.add(session)
     await uow.session.flush()
@@ -481,9 +488,7 @@ async def end_signal(
                 select(AndroidGateway).where(AndroidGateway.gateway_code == gateway_id)
             )
             if gateway_row is not None:
-                binding_locked = SessionBinding(
-                    session=session, device=device, gateway=gateway_row
-                )
+                binding_locked = SessionBinding(session=session, device=device, gateway=gateway_row)
                 await mark_result_processing(uow.session, binding_locked)
                 await uow.session.flush()
         except Exception as exc:
@@ -585,7 +590,6 @@ async def session_summary(
     from src.pages_to_audio.db.models.question import Question
     from src.pages_to_audio.db.models.rgb_sequence import RgbSequence
     from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
-    from src.pages_to_audio.rgb.policy import DEFAULT_PALETTE
 
     session = await uow.session.scalar(
         select(Session)
@@ -625,8 +629,8 @@ async def session_summary(
         letter = final.answer if final is not None else None
         color = None
         if letter in {"A", "B", "C", "D", "E"}:
-            rgb = DEFAULT_PALETTE[letter].rgb  # type: ignore[index]
-            color = {"rgb": list(rgb), "letter": letter}
+            rgb = rgb_for_answer(session.config_snapshot, "EXAM", letter)
+            color = {"rgb": rgb, "letter": letter}
         answers.append(
             {
                 "question_number": question.question_number,
@@ -659,6 +663,11 @@ async def session_summary(
         "expected_pages": session.expected_pages,
         "expected_questions": session.expected_questions,
         "minimum_ratio": float(session.minimum_ratio),
+        "settings_version": (session.config_snapshot or {}).get("settings_version", 0),
+        "rgb_defaults": {
+            key: (session.config_snapshot or {}).get(key)
+            for key in ("brightness_percent", "on_ms", "off_ms")
+        },
         "capture_source": getattr(session, "capture_source", "ANDROID_CAMERA"),
         "created_at": session.created_at.isoformat() if session.created_at else None,
         "capture_locked_at": (

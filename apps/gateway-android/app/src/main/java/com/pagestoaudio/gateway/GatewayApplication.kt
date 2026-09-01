@@ -55,7 +55,7 @@ class GatewayApplication : Application(), Configuration.Provider {
             .build()
 
         apiService = retrofit.create(ApiService::class.java)
-        sessionRepository = SessionRepository(apiService, config.deviceId, config.deviceSecret)
+        sessionRepository = SessionRepository(apiService, config.deviceId, config.deviceSecret, database.sessionHistoryDao())
         spoolRepository = SpoolRepository(this, database.spoolDao(), WorkManager.getInstance(this))
 
         Log.i(TAG, "GatewayApplication initialized baseUrl=${config.baseUrl} deviceId=${config.deviceId}")

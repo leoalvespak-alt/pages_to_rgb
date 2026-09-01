@@ -34,6 +34,22 @@
       retries: 3
       start_period: 15s
 
+  admin:
+    image: ghcr.io/leoalvespak-alt/pages_to_rgb-admin:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      API_URL: http://pages-rgb-app:8000
+    networks: [pages_rgb_net]
+    expose: ["3000"]
+    depends_on:
+      pages-rgb-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/admin/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   pages-rgb-caddy:
     image: caddy:2-alpine
     container_name: pages-rgb-caddy

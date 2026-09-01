@@ -1,3 +1,4 @@
+from src.pages_to_audio.db.models.admin_settings import AdminSettings
 from src.pages_to_audio.db.models.answer_attempt import AnswerAttempt
 from src.pages_to_audio.db.models.audio_artifact import AudioArtifact
 from src.pages_to_audio.db.models.audit_event import AuditEvent
@@ -22,6 +23,7 @@ from src.pages_to_audio.db.models.session_result_delivery import SessionResultDe
 from src.pages_to_audio.db.models.storage_orphan import StorageOrphan
 
 __all__ = [
+    "AdminSettings",
     "AndroidGateway",
     "AnswerAttempt",
     "AudioArtifact",

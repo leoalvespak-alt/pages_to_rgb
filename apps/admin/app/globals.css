@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+* { font-family: Inter, system-ui, sans-serif; }
+html { color-scheme: dark; }
+body { margin: 0; }
+button, input, select { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #ef4444; outline-offset: 2px; }
+@layer components {
+  .control { @apply w-full rounded-lg border border-zinc-700 bg-[#242424] px-3 py-2 text-sm text-white placeholder:text-zinc-500; }
+  .primary { @apply rounded-lg bg-[#C62828] px-4 py-2 text-sm font-medium text-white hover:bg-[#B71C1C] disabled:opacity-50; }
+  .secondary { @apply rounded-lg border border-zinc-700 bg-[#242424] px-3 py-2 text-sm hover:bg-zinc-700; }
+  .card { @apply rounded-xl border border-zinc-800 bg-[#1A1A1A] p-4; }
+}

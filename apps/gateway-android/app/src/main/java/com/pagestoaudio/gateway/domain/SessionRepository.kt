@@ -6,6 +6,8 @@ import com.pagestoaudio.gateway.network.EndSignalRequest
 import com.pagestoaudio.gateway.network.HandwrittenStartRequest
 import com.pagestoaudio.gateway.network.HeartbeatRequest
 import com.pagestoaudio.gateway.network.StartSessionRequest
+import com.pagestoaudio.gateway.spool.SessionHistoryDao
+import com.pagestoaudio.gateway.spool.SessionHistoryEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,6 +21,7 @@ class SessionRepository(
     private val api: ApiService,
     private val deviceId: String,
     private val deviceSecret: String? = null
+    , private val historyDao: SessionHistoryDao? = null
 ) {
     companion object {
         private const val TAG = "SessionRepository"
@@ -60,6 +63,7 @@ class SessionRepository(
                     status = body.status
                 )
                 Log.i(TAG, "startSession ok: session=${state.sessionId} resumed=${state.resumed} cursor=${state.cursor}")
+                historyDao?.upsert(SessionHistoryEntity(state.sessionId, "EXAM", System.currentTimeMillis(), status = state.status ?: "STARTED"))
                 SessionResult.Success(state)
             } else {
                 val err = resp.errorBody()?.string()
@@ -90,6 +94,7 @@ class SessionRepository(
                     status = body.status
                 )
                 Log.i(TAG, "startHandwritten ok: session=${state.sessionId} words=${body.expectedWords}")
+                historyDao?.upsert(SessionHistoryEntity(state.sessionId, "HANDWRITTEN_WORD", System.currentTimeMillis(), status = body.status ?: "STARTED"))
                 SessionResult.Success(state)
             } else {
                 val err = resp.errorBody()?.string()
