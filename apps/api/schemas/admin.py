@@ -35,12 +35,24 @@ class PaletteColor(BaseModel):
 
 
 Palette = dict[str, PaletteColor]
+HandwrittenWords = dict[str, str]
 
 
 def _validate_palette(value: Palette) -> Palette:
     if set(value) != set("ABCDE"):
         raise ValueError("Palette must contain exactly A, B, C, D and E")
     return value
+
+
+def _validate_words(value: HandwrittenWords) -> HandwrittenWords:
+    if set(value) != set("ABCDE"):
+        raise ValueError("Words must contain exactly A, B, C, D and E")
+    normalized = {letter: word.strip() for letter, word in value.items()}
+    if any(not word or len(word) > 80 for word in normalized.values()):
+        raise ValueError("Each handwritten word must contain 1 to 80 characters")
+    if len({word.casefold() for word in normalized.values()}) != 5:
+        raise ValueError("Handwritten words must be unique")
+    return normalized
 
 
 class AdminSettingsRead(BaseModel):
@@ -67,6 +79,7 @@ class AdminSettingsRead(BaseModel):
     off_ms: int
     palette: Palette
     handwritten_palette: Palette
+    handwritten_words: HandwrittenWords
     version: int
     updated_at: datetime | None = None
 
@@ -94,11 +107,17 @@ class AdminSettingsUpdate(BaseModel):
     off_ms: int | None = Field(default=None, ge=0, le=60000)
     palette: Palette | None = None
     handwritten_palette: Palette | None = None
+    handwritten_words: HandwrittenWords | None = None
 
     @field_validator("palette", "handwritten_palette")
     @classmethod
     def complete_palette(cls, value: Palette | None) -> Palette | None:
         return _validate_palette(value) if value is not None else None
+
+    @field_validator("handwritten_words")
+    @classmethod
+    def complete_words(cls, value: HandwrittenWords | None) -> HandwrittenWords | None:
+        return _validate_words(value) if value is not None else None
 
     @model_validator(mode="after")
     def key_actions_are_unambiguous(self) -> AdminSettingsUpdate:
@@ -120,6 +139,30 @@ class ProviderTestResponse(BaseModel):
     latency_ms: int
     error_code: str | None = None
     message: str | None = None
+
+
+class RgbTestRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=64)
+    rgb: tuple[int, int, int]
+    brightness_percent: int = Field(ge=0, le=100)
+    on_ms: int = Field(ge=100, le=60000)
+    off_ms: int = Field(ge=0, le=60000)
+
+    @field_validator("rgb")
+    @classmethod
+    def valid_test_rgb(cls, value: tuple[int, int, int]) -> tuple[int, int, int]:
+        if any(channel < 0 or channel > 255 for channel in value):
+            raise ValueError("RGB channels must be in [0, 255]")
+        return value
+
+
+class RgbTestResponse(BaseModel):
+    command_id: int
+    session_id: str
+    rgb: tuple[int, int, int]
+    brightness_percent: int
+    on_ms: int
+    off_ms: int
 
 
 class AdminSessionListItem(BaseModel):

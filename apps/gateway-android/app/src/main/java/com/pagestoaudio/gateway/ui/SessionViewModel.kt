@@ -45,8 +45,20 @@ data class SessionUiState(
     val lastFrameLabel: String? = null,
     val lastFrameAck: Boolean = false,
     val serverCommand: String = "—",
+    val rgbTest: RgbTestUi? = null,
     val logs: List<String> = emptyList(),
     val errorMessage: String? = null
+)
+
+data class RgbTestUi(
+    val commandId: Int,
+    val red: Int,
+    val green: Int,
+    val blue: Int,
+    val brightnessPercent: Int,
+    val onMs: Long,
+    val offMs: Long,
+    val active: Boolean = true
 )
 
 class SessionViewModel(
@@ -67,6 +79,7 @@ class SessionViewModel(
 
     private var pollJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var rgbTestJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val sessionRepository: SessionRepository get() = app.sessionRepository
@@ -169,7 +182,7 @@ class SessionViewModel(
             _uiState.update { it.copy(isStartingSession = true, errorMessage = null) }
             val st = _uiState.value.sessionType
             log("Iniciando sessão $st …")
-            val result = if (st == "HANDWRITTEN_WORD") sessionRepository.startHandwrittenSession(10) else sessionRepository.startSession(allowNewSession = true)
+            val result = if (st == "HANDWRITTEN_WORD") sessionRepository.startHandwrittenSession() else sessionRepository.startSession(allowNewSession = true)
             when (result) {
                 is SessionRepository.SessionResult.Success -> {
                     val s = result.state
@@ -189,6 +202,7 @@ class SessionViewModel(
                     lifecycleOwner?.let { bindCamera(it) }
                     startPolling(s.sessionId, s.cursor)
                     startHeartbeat(s.sessionId)
+                    startRgbTestPolling(s.sessionId)
                 }
                 is SessionRepository.SessionResult.Error -> {
                     _uiState.update { it.copy(isStartingSession = false, errorMessage = result.message) }
@@ -212,6 +226,7 @@ class SessionViewModel(
                 _uiState.update { it.copy(isCapturing = false, isConnected = false, isEndingSession = false, serverCommand = "STOP") }
                 stopPolling()
                 stopHeartbeat()
+                stopRgbTestPolling()
                 unbindCamera()
             } else {
                 val msg = res.exceptionOrNull()?.message ?: "erro desconhecido"
@@ -391,6 +406,44 @@ class SessionViewModel(
         heartbeatJob = null
     }
 
+    private fun startRgbTestPolling(sessionId: String) {
+        stopRgbTestPolling()
+        rgbTestJob = viewModelScope.launch {
+            var afterId = 0
+            while (isActive) {
+                val result = sessionRepository.fetchRgbTest(sessionId, afterId)
+                val command = result.getOrNull()
+                if (command != null && command.rgb.size == 3) {
+                    afterId = command.commandId
+                    val item = RgbTestUi(
+                        commandId = command.commandId,
+                        red = command.rgb[0].coerceIn(0, 255),
+                        green = command.rgb[1].coerceIn(0, 255),
+                        blue = command.rgb[2].coerceIn(0, 255),
+                        brightnessPercent = command.brightnessPercent.coerceIn(0, 100),
+                        onMs = command.onMs,
+                        offMs = command.offMs,
+                        active = true
+                    )
+                    _uiState.update { it.copy(rgbTest = item) }
+                    log("RGB TEST #${item.commandId}: ${item.red},${item.green},${item.blue} brilho=${item.brightnessPercent}% on=${item.onMs}ms")
+                    delay(item.onMs)
+                    _uiState.update { state -> state.copy(rgbTest = item.copy(active = false)) }
+                    delay(item.offMs)
+                    _uiState.update { state -> state.copy(rgbTest = null) }
+                } else {
+                    delay(1000)
+                }
+            }
+        }
+    }
+
+    private fun stopRgbTestPolling() {
+        rgbTestJob?.cancel()
+        rgbTestJob = null
+        _uiState.update { it.copy(rgbTest = null) }
+    }
+
     private suspend fun awaitSpoolDrain(sessionId: String, timeoutMs: Long = 30_000) {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeoutMs) {
@@ -460,6 +513,7 @@ class SessionViewModel(
         super.onCleared()
         stopPolling()
         stopHeartbeat()
+        stopRgbTestPolling()
         unbindCamera()
         unregisterNetworkCallback()
     }

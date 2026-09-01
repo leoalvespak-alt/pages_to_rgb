@@ -24,6 +24,13 @@ DEFAULT_HANDWRITTEN_PALETTE = {
     "D": {"rgb": [128, 0, 128]},
     "E": {"rgb": [255, 255, 0]},
 }
+DEFAULT_HANDWRITTEN_WORDS = {
+    "A": "João",
+    "B": "Maria",
+    "C": "Pedro",
+    "D": "Paula",
+    "E": "Fernanda",
+}
 
 
 class AdminSettings(Base):
@@ -73,6 +80,9 @@ class AdminSettings(Base):
     )
     handwritten_palette: Mapped[dict[str, dict[str, list[int]]]] = mapped_column(
         JSONB, nullable=False, default=lambda: DEFAULT_HANDWRITTEN_PALETTE.copy()
+    )
+    handwritten_words: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False, default=lambda: DEFAULT_HANDWRITTEN_WORDS.copy()
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())

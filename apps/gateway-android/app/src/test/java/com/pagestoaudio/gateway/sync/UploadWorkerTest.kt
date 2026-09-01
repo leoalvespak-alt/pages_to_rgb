@@ -14,11 +14,15 @@ import com.pagestoaudio.gateway.network.EndSignalResponse
 import com.pagestoaudio.gateway.network.FrameUploadResponse
 import com.pagestoaudio.gateway.network.HeartbeatRequest
 import com.pagestoaudio.gateway.network.HeartbeatResponse
+import com.pagestoaudio.gateway.network.HandwrittenStartRequest
+import com.pagestoaudio.gateway.network.HandwrittenStartResponse
+import com.pagestoaudio.gateway.network.HandwrittenSummaryResponse
 import com.pagestoaudio.gateway.network.HelloRequest
 import com.pagestoaudio.gateway.network.HelloResponse
 import com.pagestoaudio.gateway.network.RgbEventRequest
 import com.pagestoaudio.gateway.network.RgbEventResponse
 import com.pagestoaudio.gateway.network.RgbSequenceResponse
+import com.pagestoaudio.gateway.network.RgbTestCommandResponse
 import com.pagestoaudio.gateway.network.SessionResultResponse
 import com.pagestoaudio.gateway.network.StartSessionRequest
 import com.pagestoaudio.gateway.network.StartSessionResponse
@@ -81,7 +85,15 @@ class UploadWorkerTest {
         override suspend fun endSignal(sessionId: String, body: EndSignalRequest): Response<EndSignalResponse> = throw NotImplementedError()
         override suspend fun getResult(sessionId: String, deviceId: String, cursor: Long): Response<SessionResultResponse> = throw NotImplementedError()
         override suspend fun getRgbSequence(sessionId: String, deviceId: String, sequenceId: String?): Response<RgbSequenceResponse> = throw NotImplementedError()
+        override suspend fun getRgbTest(sessionId: String, afterId: Int): Response<RgbTestCommandResponse?> = throw NotImplementedError()
         override suspend fun postRgbEvent(sessionId: String, body: RgbEventRequest): Response<RgbEventResponse> = throw NotImplementedError()
+        override suspend fun startHandwrittenSession(body: HandwrittenStartRequest): Response<HandwrittenStartResponse> = throw NotImplementedError()
+        override suspend fun uploadHandwrittenFrame(sessionId: String, captureId: String, frameIndex: Int, sha256: String, resolution: String, receivedAt: String, orientation: Int, file: MultipartBody.Part): Response<FrameUploadResponse> = throw NotImplementedError()
+        override suspend fun captureCompleteHandwritten(sessionId: String, captureId: String, receivedFrames: Int): Response<CaptureCompleteResponse> = throw NotImplementedError()
+        override suspend fun endSignalHandwritten(sessionId: String, body: EndSignalRequest): Response<EndSignalResponse> = throw NotImplementedError()
+        override suspend fun getHandwrittenCommand(sessionId: String, cursor: Long, waitMs: Long, phase: String): Response<CommandResponse> = throw NotImplementedError()
+        override suspend fun getHandwrittenPolicy(sessionId: String): Response<CapturePolicyResponse> = throw NotImplementedError()
+        override suspend fun getHandwrittenSummary(sessionId: String): Response<HandwrittenSummaryResponse> = throw NotImplementedError()
     }
 
     @Before
@@ -111,23 +123,17 @@ class UploadWorkerTest {
         val input = androidx.work.Data.Builder()
             .putString(UploadWorker.KEY_FRAME_ID, frameId)
             .build()
-        // Construção manual via WorkerParameters — usar API compatível com WorkManager 2.9.0
-        // Para evitar acoplar à assinatura interna mutável, usamos TestListenableWorkerBuilder com factory custom
-        // mas aqui fazemos construção direta via reflexão leve: usar construtor UploadWorker(Context, WorkerParameters, ApiService?, AppDatabase?)
-        // Obtemos WorkerParameters via builder interno
-        val params = androidx.work.testing.TestListenableWorkerBuilder<UploadWorker>(context)
+        val workerFactory = object : androidx.work.WorkerFactory() {
+            override fun createWorker(
+                appContext: Context,
+                workerClassName: String,
+                workerParameters: androidx.work.WorkerParameters
+            ): androidx.work.ListenableWorker = UploadWorker(appContext, workerParameters, api, db)
+        }
+        return androidx.work.testing.TestListenableWorkerBuilder<UploadWorker>(context)
             .setInputData(input)
+            .setWorkerFactory(workerFactory)
             .build()
-            // extrair params via campo privado (fallback: criar params manualmente)
-        // Simpler: criar params via construtor conhecido (UUID, Data, tags, extras, runAttempt, executors...)
-        // Em vez de depender de assinatura, reusamos o worker criado pelo builder mas injetando deps via reflexão
-        val workerFromBuilder = params
-        // O builder já criou um worker com api=null; vamos criar novo com api correta mas copiando os params
-        // Usamos java reflection para extrair o WorkerParameters do workerFromBuilder
-        val paramsField = androidx.work.ListenableWorker::class.java.getDeclaredField("mWorkerParams")
-        paramsField.isAccessible = true
-        val workerParams = paramsField.get(workerFromBuilder) as androidx.work.WorkerParameters
-        return UploadWorker(context, workerParams, api, db)
     }
 
     @Test

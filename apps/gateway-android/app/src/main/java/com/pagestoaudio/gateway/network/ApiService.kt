@@ -87,6 +87,12 @@ interface ApiService {
         @Query("sequence_id") sequenceId: String? = null
     ): Response<RgbSequenceResponse>
 
+    @GET("gateway/session/{id}/rgb-test")
+    suspend fun getRgbTest(
+        @Path("id") sessionId: String,
+        @Query("after_id") afterId: Int = 0
+    ): Response<RgbTestCommandResponse?>
+
     @POST("gateway/session/{id}/rgb-sequence/event")
     suspend fun postRgbEvent(
         @Path("id") sessionId: String,
@@ -265,6 +271,14 @@ data class RgbSequenceResponse(
     @SerializedName("palette") val palette: Map<String, Any>? = null
 )
 
+data class RgbTestCommandResponse(
+    @SerializedName("command_id") val commandId: Int,
+    @SerializedName("rgb") val rgb: List<Int>,
+    @SerializedName("brightness_percent") val brightnessPercent: Int,
+    @SerializedName("on_ms") val onMs: Long,
+    @SerializedName("off_ms") val offMs: Long
+)
+
 data class RgbEventRequest(
     @SerializedName("device_id") val deviceId: String,
     @SerializedName("sequence_id") val sequenceId: String,
@@ -279,7 +293,7 @@ data class RgbEventResponse(
 
 data class HandwrittenStartRequest(
     @SerializedName("device_code") val deviceCode: String,
-    @SerializedName("expected_words") val expectedWords: Int = 10,
+    @SerializedName("expected_words") val expectedWords: Int? = null,
     @SerializedName("gateway_code") val gatewayCode: String? = null,
     @SerializedName("capture_source") val captureSource: String = "ANDROID_CAMERA"
 )
@@ -304,6 +318,7 @@ data class HandwrittenSummaryResponse(
 data class HandwrittenAnswerItem(
     @SerializedName("question_number") val questionNumber: Int,
     @SerializedName("answer") val answer: String? = null,
+    @SerializedName("word") val word: String? = null,
     @SerializedName("validated") val validated: Boolean = false,
     @SerializedName("color") val color: Map<String, Any>? = null
 )

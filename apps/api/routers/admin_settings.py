@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
+from sqlalchemy import select
 
 from apps.api.dependencies import UowDep
 from apps.api.schemas.admin import (
@@ -12,6 +13,8 @@ from apps.api.schemas.admin import (
     AdminSettingsUpdate,
     ProviderTestRequest,
     ProviderTestResponse,
+    RgbTestRequest,
+    RgbTestResponse,
 )
 from src.pages_to_audio.admin.settings_service import (
     SettingsConflictError,
@@ -22,6 +25,8 @@ from src.pages_to_audio.admin.settings_service import (
 )
 from src.pages_to_audio.auth.admin import AdminClaimsDep, AdminCsrfDep
 from src.pages_to_audio.db.models.audit_event import AuditEvent
+from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
+from src.pages_to_audio.db.models.session import Session
 
 router = APIRouter(prefix="/admin/settings", tags=["admin-settings"])
 
@@ -153,3 +158,47 @@ async def test_provider(
     )
     await uow.session.flush()
     return response
+
+
+@router.post("/rgb-test", response_model=RgbTestResponse)
+async def send_rgb_test(
+    body: RgbTestRequest, _claims: AdminCsrfDep, uow: UowDep
+) -> RgbTestResponse:
+    session = await uow.session.scalar(select(Session).where(Session.public_id == body.session_id))
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status not in {"CREATED", "CAPTURING"}:
+        raise HTTPException(status_code=409, detail="Session is not active")
+    command = RgbTestCommand(
+        session_id=session.id,
+        rgb=list(body.rgb),
+        brightness_percent=body.brightness_percent,
+        on_ms=body.on_ms,
+        off_ms=body.off_ms,
+    )
+    uow.session.add(command)
+    await uow.session.flush()
+    uow.session.add(
+        AuditEvent(
+            session_id=session.id,
+            event_type="ADMIN_RGB_TEST_SENT",
+            stage="DELIVER",
+            severity="INFO",
+            actor_type="admin",
+            payload={
+                "command_id": command.id,
+                "rgb": list(body.rgb),
+                "brightness_percent": body.brightness_percent,
+                "on_ms": body.on_ms,
+                "off_ms": body.off_ms,
+            },
+        )
+    )
+    return RgbTestResponse(
+        command_id=command.id,
+        session_id=str(session.public_id),
+        rgb=body.rgb,
+        brightness_percent=body.brightness_percent,
+        on_ms=body.on_ms,
+        off_ms=body.off_ms,
+    )

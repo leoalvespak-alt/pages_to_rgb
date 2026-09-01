@@ -39,7 +39,7 @@ def _strip_accents(value: str) -> str:
     )
 
 
-def normalize_word(raw: str | None) -> str | None:
+def normalize_word(raw: str | None, words: dict[str, str] | None = None) -> str | None:
     """Normaliza palavra bruta para uma das 5 canônicas ou None.
 
     - trim, case-insensitive, acento-insensitive
@@ -52,19 +52,28 @@ def normalize_word(raw: str | None) -> str | None:
         return None
     key = _strip_accents(s).lower()
     # key sem acento -> look up
-    letter = HANDWRITTEN_WORD_TO_LETTER.get(key)
+    letter_to_word = words or HANDWRITTEN_LETTER_TO_WORD
+    word_to_letter = {
+        _strip_accents(word).lower(): letter for letter, word in letter_to_word.items()
+    }
+    letter = word_to_letter.get(key)
     if letter is None:
         return None
-    return HANDWRITTEN_LETTER_TO_WORD[letter]
+    return letter_to_word[letter]
 
 
-def word_to_letter(word: str | None) -> AnswerLetter | None:
+def word_to_letter(word: str | None, words: dict[str, str] | None = None) -> AnswerLetter | None:
     """Converte palavra (qualquer case/acento) para A-E."""
-    norm = normalize_word(word)
+    norm = normalize_word(word, words)
     if norm is None:
         return None
     key = _strip_accents(norm).lower()
-    return HANDWRITTEN_WORD_TO_LETTER.get(key)
+    letter_to_word = words or HANDWRITTEN_LETTER_TO_WORD
+    dynamic = {_strip_accents(value).lower(): letter for letter, value in letter_to_word.items()}
+    letter = dynamic.get(key)
+    if letter in ("A", "B", "C", "D", "E"):
+        return letter
+    return None
 
 
 def letter_to_rgb(letter: AnswerLetter) -> tuple[int, int, int]:

@@ -577,14 +577,18 @@ async def handwritten_summary(
     for question, final in rows:
         letter = final.answer if final is not None else None
         color = None
+        word = None
         if letter in {"A", "B", "C", "D", "E"}:
             rgb = rgb_for_answer(session.config_snapshot, "HANDWRITTEN_WORD", letter)
             color = {"rgb": rgb, "letter": letter}
+            words = (session.config_snapshot or {}).get("handwritten_words", {})
+            word = words.get(letter) if isinstance(words, dict) else None
         answers.append(
             {
                 "question_number": question.question_number,
                 "status": question.status,
                 "answer": letter,
+                "word": word,
                 "validated": bool(final is not None and final.validated),
                 "color": color,
             }

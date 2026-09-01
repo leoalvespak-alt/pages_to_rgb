@@ -15,6 +15,7 @@ from src.pages_to_audio.config.settings import AppSettings, get_settings
 from src.pages_to_audio.db.models.admin_settings import (
     DEFAULT_EXAM_PALETTE,
     DEFAULT_HANDWRITTEN_PALETTE,
+    DEFAULT_HANDWRITTEN_WORDS,
     AdminSettings,
 )
 from src.pages_to_audio.db.models.audit_event import AuditEvent
@@ -44,6 +45,7 @@ class EffectiveAdminSettings:
     off_ms: int
     palette: dict[str, dict[str, list[int]]]
     handwritten_palette: dict[str, dict[str, list[int]]]
+    handwritten_words: dict[str, str]
 
     def snapshot(self, session_type: str) -> dict[str, Any]:
         data = asdict(self)
@@ -99,6 +101,7 @@ def fallback_effective(settings: AppSettings | None = None) -> EffectiveAdminSet
         handwritten_palette={
             k: {"rgb": list(v["rgb"])} for k, v in DEFAULT_HANDWRITTEN_PALETTE.items()
         },
+        handwritten_words=DEFAULT_HANDWRITTEN_WORDS.copy(),
     )
 
 
@@ -118,6 +121,7 @@ def effective_from_row(row: AdminSettings) -> EffectiveAdminSettings:
         off_ms=row.off_ms,
         palette=row.palette,
         handwritten_palette=row.handwritten_palette,
+        handwritten_words=row.handwritten_words,
     )
 
 
@@ -165,6 +169,7 @@ def settings_read(row: AdminSettings) -> AdminSettingsRead:
         off_ms=row.off_ms,
         palette=_palette_for_api(row.palette),
         handwritten_palette=_palette_for_api(row.handwritten_palette),
+        handwritten_words=row.handwritten_words,
         version=row.version,
         updated_at=row.updated_at,
     )
@@ -192,6 +197,7 @@ async def update_admin_settings(
         "off_ms",
         "palette",
         "handwritten_palette",
+        "handwritten_words",
     }
     for field in ordinary:
         if field in data and data[field] is not None:

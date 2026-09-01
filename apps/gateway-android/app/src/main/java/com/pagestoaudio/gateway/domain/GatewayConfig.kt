@@ -6,7 +6,7 @@ package com.pagestoaudio.gateway.domain
  * Persistida via DataStore em implementação completa; aqui modelo puro.
  */
 data class GatewayConfig(
-    val baseUrl: String = "https://api.pagestoaudio.example/api/v1/",
+    val baseUrl: String = "https://ptr.rotadeataque.com.br/api/v1/",
     val deviceId: String = "GW-ANDROID-001",
     val deviceSecret: String? = null,
     val captureSource: String = "ANDROID_CAMERA", // ANDROID_CAMERA | ESP32_CAMERA

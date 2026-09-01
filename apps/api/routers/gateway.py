@@ -18,6 +18,7 @@ from src.pages_to_audio.common.ids import new_public_id
 from src.pages_to_audio.db.models.capture import Capture
 from src.pages_to_audio.db.models.device import Device
 from src.pages_to_audio.db.models.gateway import AndroidGateway
+from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.domain.enums.roles import ActorType
 from src.pages_to_audio.domain.enums.session_state import SessionState
@@ -41,6 +42,14 @@ GatewayIdDep = Annotated[str, Depends(verify_gateway_token)]
 # Limitação documentada e aceita para E2E Android-Only sem ESP32. wait_ms até 25000 é
 # validado mas não bloqueia nesta versão stub (retorno imediato).
 _command_cursors: dict[str, int] = {}
+
+
+class RgbTestCommandResponse(BaseModel):
+    command_id: int
+    rgb: tuple[int, int, int]
+    brightness_percent: int
+    on_ms: int
+    off_ms: int
 
 
 class HelloRequest(BaseModel):
@@ -568,6 +577,45 @@ async def end_signal(
 
     logger.info("end_signal", session_id=session_id, status=session.status)
     return {"session_id": session_id, "status": session.status, "locked": True}
+
+
+@router.get("/session/{session_id}/rgb-test", response_model=RgbTestCommandResponse | None)
+async def get_rgb_test_command(
+    session_id: str,
+    gateway_id: GatewayIdDep,
+    uow: UowDep,
+    after_id: int = Query(default=0, ge=0),
+) -> RgbTestCommandResponse | None:
+    session = await uow.session.scalar(
+        select(Session)
+        .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
+        .where(Session.public_id == session_id, AndroidGateway.gateway_code == gateway_id)
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    command = await uow.session.scalar(
+        select(RgbTestCommand)
+        .where(
+            RgbTestCommand.session_id == session.id,
+            RgbTestCommand.id > after_id,
+            RgbTestCommand.delivered_at.is_(None),
+        )
+        .order_by(RgbTestCommand.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    if command is None:
+        return None
+    if not isinstance(command.rgb, list) or len(command.rgb) != 3:
+        raise HTTPException(status_code=500, detail="Invalid RGB test command")
+    command.delivered_at = datetime.now(UTC)
+    return RgbTestCommandResponse(
+        command_id=command.id,
+        rgb=(int(command.rgb[0]), int(command.rgb[1]), int(command.rgb[2])),
+        brightness_percent=command.brightness_percent,
+        on_ms=command.on_ms,
+        off_ms=command.off_ms,
+    )
 
 
 @router.get("/session/{session_id}/summary")

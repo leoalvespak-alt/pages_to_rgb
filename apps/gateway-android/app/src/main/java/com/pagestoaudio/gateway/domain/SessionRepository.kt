@@ -76,11 +76,10 @@ class SessionRepository(
         }
     }
 
-    suspend fun startHandwrittenSession(expectedWords: Int = 10): SessionResult = withContext(Dispatchers.IO) {
+    suspend fun startHandwrittenSession(): SessionResult = withContext(Dispatchers.IO) {
         try {
             val req = HandwrittenStartRequest(
                 deviceCode = deviceId,
-                expectedWords = expectedWords,
                 gatewayCode = deviceId,
                 captureSource = "ANDROID_CAMERA"
             )
@@ -209,6 +208,16 @@ class SessionRepository(
             val resp = api.getResult(sessionId, deviceId, cursor)
             if (resp.isSuccessful) Result.success(resp.body())
             else Result.failure(IllegalStateException("getResult ${resp.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchRgbTest(sessionId: String, afterId: Int) = withContext(Dispatchers.IO) {
+        try {
+            val resp = api.getRgbTest(sessionId, afterId)
+            if (resp.isSuccessful) Result.success(resp.body())
+            else Result.failure(IllegalStateException("getRgbTest ${resp.code()}"))
         } catch (e: Exception) {
             Result.failure(e)
         }

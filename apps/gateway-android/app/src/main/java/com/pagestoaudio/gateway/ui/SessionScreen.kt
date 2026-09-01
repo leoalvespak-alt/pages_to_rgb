@@ -98,6 +98,27 @@ fun SessionScreen(
 
         Divider()
 
+        uiState.rgbTest?.let { test ->
+            val scale = test.brightnessPercent / 100f
+            val displayColor = if (test.active) Color(
+                red = (test.red * scale).toInt(),
+                green = (test.green * scale).toInt(),
+                blue = (test.blue * scale).toInt()
+            ) else Color.Black
+            Card(
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+                colors = CardDefaults.cardColors(containerColor = displayColor)
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "TESTE RGB #${test.commandId}\n${test.red}, ${test.green}, ${test.blue} • ${test.brightnessPercent}%\nON ${test.onMs} ms • OFF ${test.offMs} ms",
+                        color = if (test.active && scale > .55f) Color.Black else Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
+
         // ── Preview (só quando CAPTURING e permissão ok) ─────────────────
         if (hasCameraPermission && uiState.isCapturing) {
             CameraPreview(
@@ -189,7 +210,7 @@ fun SessionScreen(
         }
         if (uiState.sessionType == "HANDWRITTEN_WORD") {
             Text(
-                "10 fotos — 5 nomes: João(Azul)/Maria(Vermelho)/Pedro(Verde)/Paula(Roxo)/Fernanda(Amarelo)",
+                "Quantidade, palavras e cores definidas no painel Admin",
                 color = Color(0xFF1565C0),
                 style = MaterialTheme.typography.bodySmall
             )

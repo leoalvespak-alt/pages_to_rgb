@@ -18,6 +18,7 @@ from src.pages_to_audio.db.models.question import Question
 from src.pages_to_audio.db.models.retrieval_run import RetrievalRun
 from src.pages_to_audio.db.models.rgb_sequence import RgbSequence
 from src.pages_to_audio.db.models.rgb_sequence_event import RgbSequenceEvent
+from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
 from src.pages_to_audio.db.models.storage_orphan import StorageOrphan
@@ -43,6 +44,7 @@ __all__ = [
     "RetrievalRun",
     "RgbSequence",
     "RgbSequenceEvent",
+    "RgbTestCommand",
     "Session",
     "SessionResultDelivery",
     "StorageOrphan",
