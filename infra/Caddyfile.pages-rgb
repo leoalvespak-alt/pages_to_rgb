@@ -5,12 +5,10 @@
 :80 {
 	@ptr host ptr.rotadeataque.com.br
 	handle @ptr {
-		handle / {
-			redir /admin 302
-		}
-		handle /favicon.ico {
-			respond 204
-		}
+		@root path /
+		redir @root /admin 302
+		@favicon path /favicon.ico
+		respond @favicon 204
 		handle /admin* {
 			reverse_proxy admin:3000
 		}
