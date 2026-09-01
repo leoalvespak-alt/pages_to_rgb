@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Pages to Audio API",
         version="0.1.0",
-        docs_url="/docs" if settings.APP_ENV != "production" else None,
+        docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
     )
