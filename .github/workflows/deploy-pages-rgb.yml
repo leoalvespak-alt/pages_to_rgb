@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }} # ghcr.io/leoalvespak-alt/pages_to_rgb
+  ADMIN_IMAGE_NAME: ${{ github.repository }}-admin
 
 jobs:
   build:
@@ -69,4 +70,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Extract Admin metadata
+        id: admin-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.ADMIN_IMAGE_NAME }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Admin
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile.admin
+          push: true
+          tags: ${{ steps.admin-meta.outputs.tags }}
+          labels: ${{ steps.admin-meta.outputs.labels }}
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,mode=max,scope=admin
           platforms: linux/amd64
