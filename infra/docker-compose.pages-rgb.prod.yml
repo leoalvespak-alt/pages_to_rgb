@@ -1,4 +1,4 @@
-services:
+﻿services:
   pages-rgb-app:
     image: ghcr.io/leoalvespak-alt/pages_to_rgb:${IMAGE_TAG:-latest}
     container_name: pages-rgb-app
@@ -39,7 +39,7 @@ services:
     container_name: pages-rgb-caddy
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8081:80"
     volumes:
       - ./Caddyfile.pages-rgb:/etc/caddy/Caddyfile:ro
       - pages_rgb_caddy_data:/data
@@ -59,3 +59,4 @@ volumes:
     name: pages_rgb_caddy_data
   pages_rgb_caddy_config:
     name: pages_rgb_caddy_config
+

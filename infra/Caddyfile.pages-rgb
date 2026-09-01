@@ -1,24 +1,13 @@
-{
+﻿{
 	admin off
 }
 
-ptr.rotadeataque.com.br {
-	reverse_proxy pages-rgb-app:8000 {
-		header_up Host {host}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-Proto {scheme}
-	}
-	request_body {
-		max_size 20MB
-	}
-	# SSE / long polling
-	flush_interval -1
-	log {
-		output stdout
-		format console
-	}
-}
-
 :80 {
-	respond "pages-to-rgb health" 200
+	@ptr host ptr.rotadeataque.com.br
+	handle @ptr {
+		reverse_proxy pages-rgb-app:8000
+	}
+	handle {
+		respond "pages-to-rgb health" 200
+	}
 }
