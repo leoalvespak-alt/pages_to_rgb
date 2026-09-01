@@ -1,13 +1,12 @@
 "use client";
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const search = useSearchParams();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,7 +21,7 @@ export default function LoginPage() {
     if (res.ok && data.token) {
       router.push("/admin/processos");
     } else if (res.ok && data.authenticated) {
-      const next = search.get("next");
+      const next = new URL(window.location.href).searchParams.get("next");
       router.push(next && next.startsWith("/admin/") ? next : "/admin/processos");
     } else {
       setError("Dados inválidos");
