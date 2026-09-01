@@ -7,6 +7,10 @@ __pycache__
 .git
 .git/*
 node_modules
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+apps/gateway-android/app/build
 dist
 *.pyc
 *.pyo
