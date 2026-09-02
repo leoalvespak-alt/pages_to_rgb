@@ -34,16 +34,7 @@ jobs:
         run: uv run ruff check src/ apps/
 
       - name: Type check
-        run: >-
-          uv run mypy src/pages_to_audio/ai
-            src/pages_to_audio/llm/providers/gemini_provider.py
-            src/pages_to_audio/ocr/providers/google_document_ai.py
-            apps/api/routers/admin_settings.py
-            apps/api/schemas/admin.py
-            src/pages_to_audio/admin/settings_service.py
-            --ignore-missing-imports --follow-imports=skip
-            --allow-subclassing-any --allow-untyped-decorators
-            --disable-error-code=no-any-return
+        run: uv run mypy src/pages_to_audio/ai src/pages_to_audio/llm/providers/gemini_provider.py src/pages_to_audio/ocr/providers/google_document_ai.py apps/api/routers/admin_settings.py apps/api/schemas/admin.py src/pages_to_audio/admin/settings_service.py --ignore-missing-imports --follow-imports=skip --allow-subclassing-any --allow-untyped-decorators --disable-error-code=no-any-return
 
       - name: Unit tests
         run: uv run pytest tests/unit -q
