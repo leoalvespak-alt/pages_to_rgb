@@ -19,4 +19,4 @@ Thumbs.db
 
 # Keep spool DB out of repo
 gateway_spool.db
-spool/
+/spool/
