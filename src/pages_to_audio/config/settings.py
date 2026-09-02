@@ -83,6 +83,7 @@ class AppSettings(BaseSettings):
 
     # Additional model providers configurable by the admin
     GEMINI_API_KEY: SecretStr = SecretStr("")
+    GEMINI_MODEL: str = "gemini-3.1-pro-preview"
     GLM_API_KEY: SecretStr = SecretStr("")
 
     # OCR

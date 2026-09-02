@@ -79,14 +79,40 @@ async def test_update_palette_version_and_audit(monkeypatch) -> None:  # type: i
 
 
 @pytest.mark.asyncio
+async def test_masked_google_document_credential_is_preserved(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ADMIN_SETTINGS_ENCRYPTION_KEY", "masked-google-key")
+    reset_settings_cache()
+    encrypted = encrypt_secret("{service-account-json}")
+    row = AdminSettings(
+        singleton_key=1,
+        version=2,
+        google_document_ai_credentials_encrypted=encrypted,
+    )
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=row)
+    db.flush = AsyncMock()
+    db.add = MagicMock()
+    result = await update_admin_settings(
+        db,
+        AdminSettingsUpdate(version=2, google_document_ai_credentials="••••••••"),
+    )
+    assert result.google_document_ai_credentials_encrypted == encrypted
+    assert (
+        decrypt_secret(result.google_document_ai_credentials_encrypted) == "{service-account-json}"
+    )
+    reset_settings_cache()
+
+
+@pytest.mark.asyncio
 @respx.mock
 async def test_provider_probe_success_and_unauthorized() -> None:
-    route = respx.post("https://api.deepseek.com/chat/completions").mock(
-        return_value=httpx.Response(200, json={"choices": []})
-    )
-    await _probe_provider("deepseek", "deepseek-v4-pro", "sk-test")
+    route = respx.post(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
+    ).mock(return_value=httpx.Response(200, json={"candidates": []}))
+    await _probe_provider("gemini", "gemini-3.1-pro-preview", "sk-test")
     assert route.called
 
     route.mock(return_value=httpx.Response(401, json={"error": "invalid"}))
     with pytest.raises(httpx.HTTPStatusError):
-        await _probe_provider("deepseek", "deepseek-v4-pro", "sk-test")
+        await _probe_provider("gemini", "gemini-3.1-pro-preview", "sk-test")

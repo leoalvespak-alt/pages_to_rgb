@@ -8,6 +8,8 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 node_modules/
+.next/
+tsconfig.tsbuildinfo
 dist/
 *.mp3
 tests/fixtures/golden/*.jpg

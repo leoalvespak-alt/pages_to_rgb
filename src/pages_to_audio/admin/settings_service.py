@@ -46,6 +46,10 @@ class EffectiveAdminSettings:
     palette: dict[str, dict[str, list[int]]]
     handwritten_palette: dict[str, dict[str, list[int]]]
     handwritten_words: dict[str, str]
+    google_document_ai_project_id: str | None
+    google_document_ai_location: str
+    google_document_ai_processor_id: str | None
+    google_document_ai_processor_version: str | None
 
     def snapshot(self, session_type: str) -> dict[str, Any]:
         data = asdict(self)
@@ -78,6 +82,20 @@ def decrypt_secret(value: str | None, settings: AppSettings | None = None) -> st
         raise SettingsCryptoError("Encrypted admin secret is invalid") from exc
 
 
+def provider_secret(row: AdminSettings, provider: str) -> str:
+    """Resolve one provider credential without exposing ciphertext to callers."""
+    field = {
+        "deepseek": "deepseek_api_key_encrypted",
+        "gemini": "gemini_api_key_encrypted",
+        "claude": "anthropic_api_key_encrypted",
+        "glm": "glm_api_key_encrypted",
+        "google_document_ai": "google_document_ai_credentials_encrypted",
+    }.get(provider)
+    if field is None:
+        raise ValueError(f"Unknown provider: {provider}")
+    return decrypt_secret(getattr(row, field, None))
+
+
 def mask_secret(value: str | None) -> str:
     return "••••••••" if value else ""
 
@@ -87,9 +105,9 @@ def fallback_effective(settings: AppSettings | None = None) -> EffectiveAdminSet
     return EffectiveAdminSettings(
         version=0,
         ocr_provider="google_document_ai",
-        solve_model=app.DEEPSEEK_MODEL,
-        verify_model=app.DEEPSEEK_MODEL,
-        arbiter_model=app.ANTHROPIC_MODEL_ARBITER,
+        solve_model=app.GEMINI_MODEL,
+        verify_model=app.GEMINI_MODEL,
+        arbiter_model=app.GEMINI_MODEL,
         expected_pages=app.DEFAULT_EXPECTED_PAGES,
         expected_questions=app.DEFAULT_EXPECTED_QUESTIONS,
         handwritten_expected_questions=10,
@@ -102,6 +120,10 @@ def fallback_effective(settings: AppSettings | None = None) -> EffectiveAdminSet
             k: {"rgb": list(v["rgb"])} for k, v in DEFAULT_HANDWRITTEN_PALETTE.items()
         },
         handwritten_words=DEFAULT_HANDWRITTEN_WORDS.copy(),
+        google_document_ai_project_id=app.GOOGLE_DOCUMENT_AI_PROJECT_ID or None,
+        google_document_ai_location=app.GOOGLE_DOCUMENT_AI_LOCATION,
+        google_document_ai_processor_id=app.GOOGLE_DOCUMENT_AI_PROCESSOR_ID or None,
+        google_document_ai_processor_version=None,
     )
 
 
@@ -122,6 +144,10 @@ def effective_from_row(row: AdminSettings) -> EffectiveAdminSettings:
         palette=row.palette,
         handwritten_palette=row.handwritten_palette,
         handwritten_words=row.handwritten_words,
+        google_document_ai_project_id=row.google_document_ai_project_id,
+        google_document_ai_location=row.google_document_ai_location,
+        google_document_ai_processor_id=row.google_document_ai_processor_id,
+        google_document_ai_processor_version=row.google_document_ai_processor_version,
     )
 
 
@@ -152,14 +178,21 @@ def settings_read(row: AdminSettings) -> AdminSettingsRead:
         solve_model=row.solve_model,
         verify_model=row.verify_model,
         arbiter_model=row.arbiter_model,
-        deepseek_api_key=mask_secret(row.deepseek_api_key_encrypted),
         gemini_api_key=mask_secret(row.gemini_api_key_encrypted),
-        anthropic_api_key=mask_secret(row.anthropic_api_key_encrypted),
-        glm_api_key=mask_secret(row.glm_api_key_encrypted),
-        deepseek_configured=bool(row.deepseek_api_key_encrypted),
+        google_document_ai_project_id=row.google_document_ai_project_id or "",
+        google_document_ai_location=row.google_document_ai_location,
+        google_document_ai_processor_id=row.google_document_ai_processor_id or "",
+        google_document_ai_processor_version=row.google_document_ai_processor_version,
+        google_document_ai_credentials=mask_secret(row.google_document_ai_credentials_encrypted),
         gemini_configured=bool(row.gemini_api_key_encrypted),
-        anthropic_configured=bool(row.anthropic_api_key_encrypted),
-        glm_configured=bool(row.glm_api_key_encrypted),
+        google_document_ai_configured=bool(
+            row.google_document_ai_project_id
+            and row.google_document_ai_location
+            and row.google_document_ai_processor_id
+        ),
+        google_document_ai_credentials_configured=bool(
+            row.google_document_ai_credentials_encrypted
+        ),
         expected_pages=row.expected_pages,
         expected_questions=row.expected_questions,
         handwritten_expected_questions=row.handwritten_expected_questions,
@@ -198,6 +231,10 @@ async def update_admin_settings(
         "palette",
         "handwritten_palette",
         "handwritten_words",
+        "google_document_ai_project_id",
+        "google_document_ai_location",
+        "google_document_ai_processor_id",
+        "google_document_ai_processor_version",
     }
     for field in ordinary:
         if field in data and data[field] is not None:
@@ -219,6 +256,14 @@ async def update_admin_settings(
             if value and "•" not in value and value != "***":
                 setattr(row, column, encrypt_secret(value))
                 changed.append(input_field)
+    if data.get("clear_google_document_ai_credentials"):
+        row.google_document_ai_credentials_encrypted = None
+        changed.append("google_document_ai_credentials")
+    else:
+        value = data.get("google_document_ai_credentials")
+        if value and "•" not in value and value != "***":
+            row.google_document_ai_credentials_encrypted = encrypt_secret(value)
+            changed.append("google_document_ai_credentials")
     row.version += 1
     db.add(
         AuditEvent(

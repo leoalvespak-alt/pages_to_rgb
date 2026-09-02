@@ -58,13 +58,29 @@ class AdminSettings(Base):
         SmallInteger, nullable=False, unique=True, server_default=text("1")
     )
     ocr_provider: Mapped[str] = mapped_column(Text, nullable=False, default="google_document_ai")
-    solve_model: Mapped[str] = mapped_column(Text, nullable=False, default="deepseek-v4-pro")
-    verify_model: Mapped[str] = mapped_column(Text, nullable=False, default="deepseek-v4-pro")
-    arbiter_model: Mapped[str] = mapped_column(Text, nullable=False, default="claude-opus-5")
+    solve_model: Mapped[str] = mapped_column(
+        Text, nullable=False, default="gemini-3.1-pro-preview"
+    )
+    verify_model: Mapped[str] = mapped_column(
+        Text, nullable=False, default="gemini-3.1-pro-preview"
+    )
+    arbiter_model: Mapped[str] = mapped_column(
+        Text, nullable=False, default="gemini-3.1-pro-preview"
+    )
     deepseek_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     gemini_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     anthropic_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     glm_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Google Document AI is a separate credential/configuration from Gemini.
+    google_document_ai_project_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_document_ai_location: Mapped[str] = mapped_column(
+        Text, nullable=False, default="us", server_default="us"
+    )
+    google_document_ai_processor_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_document_ai_processor_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_document_ai_credentials_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
     secrets_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     expected_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     expected_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=70)

@@ -1,11 +1,15 @@
 # Plano de execução — Admin + API + Banco + APK 100% no PTR
 
-**Versão:** 2.0 — 01/09/2026  
+**Versão:** 2.1 — 02/09/2026  
 **Destino:** `https://ptr.rotadeataque.com.br`  
 **Repositório:** `leoalvespak-alt/pages_to_rgb`  
 **Branch de entrega:** `main`
 
 **Objetivo:** entregar uma solução operacional completa, segura e auditada, composta por admin web, API administrativa, persistência PostgreSQL, configurações realmente aplicadas ao pipeline RGB, APK Android com preview/histórico/offline, testes, imagens Docker, deploy e rollback.
+
+**Política de IA aprovada (02/09/2026):** usar exclusivamente Google Document AI Enterprise OCR e Gemini 3.1 Pro Preview (`gemini-3.1-pro-preview`). DeepSeek, Claude e GLM ficam fora do fluxo ativo. O pipeline obrigatório é: imagem original → Document AI (texto, estrutura, símbolos e qualidade) → Gemini multimodal (OCR + imagem para conferência/reconstrução fundamentada) → texto consolidado → Gemini novamente para correção/resolução. Credenciais e configurações dos dois serviços permanecem independentes e nunca são expostas.
+
+**Política de confiança:** texto comum usa limites `0,90/0,75`; trechos críticos usam `0,95/0,85`. Só recompor quando houver indício de degradação; a ordem de evidência é visual > OCR Google > contexto local, e revisão manual fica reservada a confiança abaixo do limite inferior ou ambiguidade com impacto na resposta.
 
 > Este documento é um roteiro de execução. A IDE/IA deve implementar, testar, auditar, corrigir e validar cada fase antes de avançar. Arquivo criado não significa etapa pronta: só marcar uma tarefa como concluída quando o critério de aceite estiver comprovado.
 
@@ -747,3 +751,216 @@ A IDE/IA deve entregar, e não apenas responder “feito”:
 10. SHA em produção e runbook de rollback.
 
 Se qualquer MUST falhar, informar bloqueio, evidência, impacto e próximo passo; não classificar como 100%.
+
+---
+
+## 20. Plano corretivo prioritário — incidentes de produção de 02/09/2026
+
+> Esta seção tem prioridade sobre as fases remanescentes. Ela consolida os problemas vistos no Android e no Admin e deve ser executada em ordem. Não marcar como concluído apenas porque o código foi alterado: cada passo exige teste, push, deploy e validação no dispositivo ou navegador real.
+
+### 20.0 Estado observado e diagnóstico congelado
+
+| ID | Sintoma | Causa comprovada ou lacuna | Estado atual |
+|---|---|---|---|
+| INC-01 | Android: `Unable to resolve host ptr.rotadeataque.com.br` ao iniciar sessão | O DNS público e a API estão saudáveis, mas o resolvedor da rede/Android falhou antes de qualquer HTTP | Correção local parcial; falta compilar, instalar e testar no celular |
+| INC-02 | Admin: `PUT /api/v1/admin/settings` retorna 500 | O ORM de `AuditEvent` envia `question_id`, `frame_id` e `capture_id`, mas produção está em Alembic `0007` sem essas colunas | Migração corretiva local parcial; falta validar e publicar |
+| INC-03 | Admin: `Provider key is not configured` | As chaves cifradas ainda estão vazias no singleton `admin_settings`; o botão de teste só usa chave já salva, não o valor ainda digitado | Pendente |
+| INC-04 | Teste Gemini falha mesmo com modelo selecionado | O código usa `gemini-3.1-pro`, mas o ID oficial é `gemini-3.1-pro-preview` | Pendente |
+| INC-05 | Teste GLM pode falhar por endpoint/modelo | O código usa endpoint legado `open.bigmodel.cn` e modelo `glm-5.3`; a documentação oficial atual lista `api.z.ai` e `glm-5.1`, `glm-5-turbo` e `glm-5`, não `glm-5.3` | Pendente; não inventar ID |
+| INC-06 | Google OCR aparece como opção, mas não pode ser configurado integralmente no Admin | Document AI exige projeto, região, processor e credencial ADC/service account; hoje o Admin possui apenas a chave Gemini | Pendente |
+| INC-07 | Testar provider no Admin não garante que o pipeline real o utilize | Há clientes que ainda leem `AppSettings`/env no construtor, enquanto o Admin persiste secrets no banco | Pendente |
+
+Antes de editar:
+
+- registrar `git status --short`, SHA local/remoto, Alembic head/current e imagens em produção;
+- preservar as alterações locais já iniciadas em `GatewayApplication.kt`, `FallbackDns.kt`, `build.gradle.kts`, `0008_audit_event_context_columns.py` e `smoke-admin-prod.sh`;
+- não imprimir nem copiar chaves para terminal, logs, Markdown, commit, CI artifact, APK ou frontend;
+- criar `docs/progress/INCIDENTES_2026-09-02.md` e atualizar cada item com comando, resultado e evidência.
+
+**Aceite:** baseline registrado, nenhuma alteração do usuário perdida e nenhuma credencial exposta.
+
+### 20.1 Corrigir o 500 de settings e alinhar o banco
+
+1. Revisar `AuditEvent` contra todas as migrações, não somente o erro atual.
+2. Completar `0008_audit_event_context_columns.py`, adicionando como nullable:
+   - `question_id UUID`;
+   - `frame_id UUID`;
+   - `capture_id UUID`.
+3. Confirmar que a migração tem `down_revision = "0007"`, `upgrade()` e `downgrade()` simétricos.
+4. Criar teste de migração em PostgreSQL descartável: `0007 → 0008 → 0007 → 0008`.
+5. Criar teste de integração que faça login, obtenha CSRF, execute settings GET, PUT com o mesmo conteúdo/version correto e readback.
+6. Confirmar que o PUT incrementa `version` exatamente uma vez e cria `ADMIN_SETTINGS_UPDATED` sem valores de secrets.
+7. Confirmar 409 com version antiga e ausência de alteração parcial.
+8. Antes de produção, gerar backup nomeado `pre-0008-<sha>.dump`; validar tamanho e possibilidade de leitura pelo `pg_restore --list`.
+
+**Aceite:** PUT retorna 200, readback reflete a nova versão, AuditEvent existe e o log da API não contém `UndefinedColumnError`.
+
+### 20.2 Catálogo aprovado de providers e modelos
+
+O catálogo ativo tem somente duas entradas e é a única fonte usada por schema, router e frontend:
+
+| Função | Provider | ID/objeto | Credencial |
+|---|---|---|---|
+| OCR especializado | Google Document AI Enterprise | processor type `OCR_PROCESSOR` + project/location/processor ID/version | ADC/service account independente |
+| Conferência multimodal, solver, verifier e arbiter | Google Gemini 3.1 Pro Preview | `gemini-3.1-pro-preview` | `GEMINI_API_KEY` |
+
+Passos:
+
+1. Manter `ProviderName`/`ModelName` restritos a `google_document_ai` e `gemini-3.1-pro-preview`; o frontend deve obter o catálogo por API autenticada.
+2. Remover DeepSeek, Claude e GLM dos selects, testes e novas sessões. Colunas legadas podem permanecer somente para migração/rollback e nunca devem ser escolhidas.
+3. Testar Gemini com `generateContent` e Document AI com leitura autenticada do processor, usando timeouts e erros normalizados (`KEY_MISSING`, `UNAUTHORIZED`, `RATE_LIMITED`, `TIMEOUT`, `DNS_ERROR`, `UPSTREAM_5XX`, `INVALID_RESPONSE`).
+4. Não devolver body bruto, prompt, resposta ou credencial do provider; registrar apenas provider, modelo, latência e código seguro em `AuditEvent`.
+
+**Aceite:** nenhuma opção ativa menciona DeepSeek, Claude ou GLM; os dois IDs acima são os únicos persistidos para sessões novas.
+
+### 20.3 Configurar secrets sem vazamento
+
+Tratar Gemini e Google Document AI como credenciais independentes.
+
+Campo LLM no Admin:
+
+- `gemini_api_key`.
+
+Campos Google Document AI:
+
+- `google_document_ai_project_id`;
+- `google_document_ai_location`;
+- `google_document_ai_processor_id`;
+- `google_document_ai_processor_version` opcional;
+- credencial ADC por referência a secret montado ou JSON de service account cifrado. Preferir referência/secret manager; nunca devolver o JSON ao browser após salvar.
+
+Passos:
+
+1. Verificar se as credenciais já existem em secret/env de produção sem exibir seus valores.
+2. Se existirem, migrar por processo one-shot que leia o secret e grave ciphertext no singleton; logar somente provider e sucesso/falha.
+3. Se não existirem, deixar os campos como `Não configurado` e exigir inserção pelo operador autorizado. A IDE não pode fabricar chaves.
+4. Validar formato mínimo no backend, cifrar com `ADMIN_SETTINGS_ENCRYPTION_KEY` e gravar apenas ciphertext.
+5. Campo vazio preserva; remoção exige checkbox/flag explícita e confirmação.
+6. Após PUT 200, refazer GET e conferir somente `*_configured=true` e máscara; nunca comparar texto puro no frontend.
+7. Para Gemini, usar chave de autorização/restrita à Gemini API conforme política vigente; para Document AI, limitar IAM da service account ao projeto/processor necessário.
+8. Documentar rotação sem downtime: adicionar nova → testar → ativar → revogar antiga.
+
+**Aceite:** Gemini e Document AI têm flags independentes, teste seguro e nenhuma chave aparece em responses, logs, banco em claro, Git, bundle ou APK. Credencial ausente permanece pendência explícita.
+
+### 20.4 Fazer as configurações alimentarem o pipeline real
+
+1. Criar uma interface/factory única de configuração efetiva que leia o snapshot da sessão e, de forma segura, resolva a credencial cifrada no servidor.
+2. Remover inicialização runtime exclusivamente por `AppSettings`/env em Gemini e Google Document AI quando a sessão possuir configuração administrativa válida.
+3. Manter env apenas como bootstrap/fallback explícito, observável e documentado; nunca fallback silencioso para outro modelo.
+4. Persistir no snapshot apenas provider/model ID/configuração não secreta e `settings_version`; nunca persistir API key ou service-account JSON no snapshot.
+5. Usar o adapter real de Gemini para conferência/resolução e o adapter real de Document AI para OCR; não criar fallback silencioso para outro provider.
+6. Completar Google Document AI: injetar `StoragePort`, ler bytes reais da imagem e remover o placeholder `image_bytes = b""`.
+7. Testar escolha de OCR, solve, verify e arbiter por sessão nova; sessão em andamento conserva o snapshot antigo.
+8. Registrar provider/model efetivamente usado, latência e fallback em métricas/AuditEvent sem conteúdo sensível.
+
+**Aceite:** um teste E2E inicia nova sessão e registra nos metadados seguros `google_document_ai` → `gemini-3.1-pro-preview` (conferência) → `gemini-3.1-pro-preview` (resolução); não basta o botão `Verificar` ficar verde.
+
+### 20.5 Completar a UX do Admin para providers e OCR
+
+1. Separar cards `OCR` e `Modelos de raciocínio`.
+2. Mostrar status para Gemini e Document AI: `Não configurado`, `Salvo, não testado`, `Conectado`, `Credencial recusada`, `Modelo indisponível` e `Erro de rede`.
+3. O botão `Verificar` deve:
+   - ficar desabilitado se não há chave salva; ou
+   - oferecer `Salvar e verificar`, executando PUT/readback antes do teste.
+4. Não testar silenciosamente a chave antiga quando existe uma nova chave digitada e ainda não salva.
+5. Fixar OCR em Document AI e solve/verify/arbiter em Gemini 3.1 Pro; permitir apenas o ajuste de credenciais e parâmetros do processor.
+6. Para Google OCR, incluir projeto, location, processor e status da credencial; adicionar teste que obtenha token e valide acesso ao processor sem processar documento cobrável quando houver endpoint adequado.
+7. Mostrar aviso claro para modelo preview/deprecated e impedir ativação de ID removido.
+8. Tratar 409 recarregando settings e pedindo reaplicação consciente; manter valores digitados localmente até decisão do operador.
+9. Retestar a 375×812, 768×1024 e 1440×900, com teclado, foco, Console e Network sem erros.
+
+**Aceite:** operador consegue salvar, ler de volta e testar cada provider sem ambiguidade; mensagens são localizadas e acionáveis.
+
+### 20.6 Tornar o APK resiliente ao DNS e gerar uma versão nova
+
+1. Manter `INTERNET` permission e URL HTTPS `https://ptr.rotadeataque.com.br/api/v1/`.
+2. Completar `FallbackDns`: usar primeiro `Dns.SYSTEM` e recorrer a DNS-over-HTTPS somente em `UnknownHostException`.
+3. Usar bootstrap por IP e TLS com hostname validado; não desabilitar verificação TLS e não fixar o IP da API como solução permanente.
+4. Testar unitariamente:
+   - resolvedor do Android funciona e fallback não é chamado;
+   - resolvedor do Android falha e DoH é chamado;
+   - ambos falham e a UI apresenta erro acionável.
+5. Atualizar versionCode/versionName e firmware header.
+6. Executar `testDebugUnitTest`, `lintDebug` e `assembleDebug` com JDK 17/SDK 34.
+7. Verificar Manifest final, assinatura, tamanho, conteúdo e SHA-256; confirmar que não há chaves no APK.
+8. Instalar com `adb install -r` quando o aparelho estiver conectado; se não estiver, entregar caminho absoluto e checksum.
+9. No celular real, testar iniciar/encerrar sessão em:
+   - Wi-Fi atual que apresentou falha;
+   - dados móveis;
+   - modo avião seguido de reconexão;
+   - DNS privado inválido, confirmando fallback ou mensagem correta.
+10. Confirmar no servidor que a sessão chegou autenticada; não considerar apenas a ausência do banner de erro.
+
+**Aceite:** o mesmo aparelho inicia sessão e recebe resposta da API em pelo menos Wi-Fi e dados móveis; falha total de rede continua sendo reportada sem crash.
+
+### 20.7 Suíte, auditoria e gates de release
+
+Executar e registrar:
+
+1. Backend: format/lint, mypy, suíte unitária e integração completa.
+2. Migração: upgrade/downgrade/upgrade em PostgreSQL compatível com produção.
+3. Admin: install reproduzível, lint, typecheck, testes, build.
+4. Android: unit tests, lint, assemble e inspeção do APK.
+5. Browser real: login → GET settings → PUT → readback → testar providers → logout.
+6. API real: sessão Android start/end e health live/ready.
+7. Segurança: busca de secrets, redaction de logs, ciphertext no banco, CSRF, cookies, dependências e TLS.
+8. Regressão: palavras manuscritas, duas paletas, brilho/on/off e comando RGB manual continuam funcionando.
+
+Atualizar `scripts/smoke-admin-prod.sh` para obrigatoriamente executar GET/PUT/readback com o mesmo payload seguro. Usar diretório temporário isolado e apagar somente esse diretório via `trap`.
+
+**Gate:** qualquer 500, erro TypeScript/Kotlin/Python, provider selecionado sem teste, migração divergente, segredo detectado ou fluxo móvel não comprovado bloqueia push/deploy.
+
+### 20.8 Commit, push e deploy controlado
+
+1. Revisar `git diff`, `git diff --check`, untracked e arquivos gerados; APK/keystore/credentials não entram no Git.
+2. Criar commits coesos, por exemplo:
+   - `fix(db): align audit event schema with settings writes`;
+   - `fix(admin): validate provider credentials and official model ids`;
+   - `fix(android): add secure DNS fallback for gateway API`;
+   - `test(release): cover settings write and provider production smoke`.
+3. Push para `main` somente após os gates locais.
+4. Aguardar CI verde e fixar o SHA/digests; não fazer deploy de working tree ou `latest` ambíguo.
+5. Gerar backup `pre-0008-0010`, executar migrações one-shot `0008`→`0010`, conferir `alembic current = 0010` e só então atualizar API/Admin.
+6. Rodar `scripts/deploy-admin-apk-prod.sh` ou fluxo equivalente por SHA, validar health e Caddy.
+7. Executar smoke público completo, incluindo settings PUT/readback e provider tests que não gerem custo relevante.
+8. Observar logs 15–30 minutos por 5xx, falhas DNS, auth de provider, rate limit e restart loop.
+9. Se falhar, voltar imagens ao digest anterior; como `0008` é aditiva/nullable, preferir rollback da app sem downgrade imediato. Restaurar banco somente com evidência de corrupção/perda.
+
+**Aceite:** `origin/main`, API e Admin executam o mesmo SHA aprovado; Alembic está em `0010`; smoke público e teste no Android estão verdes; checksums e evidências estão no relatório.
+
+### 20.9 Checklist operacional deste ciclo
+
+- [ ] INC-01 DNS Android corrigido e retestado no aparelho.
+- [ ] INC-02 settings PUT 500 corrigido em produção.
+- [ ] INC-03 credenciais Gemini e Document AI inseridas por canal seguro e flags confirmadas.
+- [ ] Gemini `gemini-3.1-pro-preview` testado e integrado para conferência e resolução.
+- [ ] Google Document AI project/location/processor/ADC configurados e OCR com bytes reais testado.
+- [ ] Faixas de confiança comuns/críticas, recomposição fundamentada e revisão manual seletiva testadas.
+- [ ] Nenhum secret em texto puro em resposta, log, DB, Git, frontend ou APK.
+- [ ] Backend/Admin/Android/migração verdes.
+- [ ] APK novo instalado ou entregue com caminho absoluto e SHA-256.
+- [ ] CI, push, deploy, smoke e observação concluídos.
+
+### 20.10 Referências oficiais que devem ser revalidadas na execução
+
+- Gemini 3.1 Pro Preview: <https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview>
+- Google Document AI authentication/errors: <https://docs.cloud.google.com/document-ai/docs/error-messages>
+- Google Enterprise Document OCR: <https://docs.cloud.google.com/document-ai/docs/enterprise-document-ocr>
+
+Como modelos e políticas de autenticação mudam, a IDE/IA deve consultar essas fontes novamente no dia do deploy e registrar os IDs efetivamente aceitos no relatório, sem copiar credenciais.
+
+### 20.11 Política de IA — decisão de produto que substitui a matriz anterior
+
+1. Remover DeepSeek, Claude e GLM do catálogo ativo, selects e testes do Admin. As colunas legadas de banco podem permanecer nullable para rollback, mas não podem ser escolhidas por uma sessão nova.
+2. Fixar o OCR em `google_document_ai` e o modelo Gemini em `gemini-3.1-pro-preview` para revisão e resolução. Não usar `gemini-3.1-pro` (ID inexistente) nem substituir silenciosamente por outro modelo.
+3. Implementar o fluxo em `src/pages_to_audio/ai/question_pipeline.py`: enviar a foto ao Document AI; enviar texto OCR + bytes da imagem ao Gemini multimodal; persistir somente o texto consolidado, flags de incerteza e metadados não sensíveis; enviar o consolidado ao Gemini para correção/resolução.
+4. O teste de provider no Admin deve verificar separadamente a credencial do Document AI (projeto, região e processor) e a chave Gemini. Falha de qualquer camada bloqueia ativação e aparece com código acionável.
+5. Criar testes unitários/mocks do fluxo em três passos, garantindo que a imagem original chega à revisão Gemini, que conteúdo sem evidência não é inventado e que o texto consolidado é a única entrada da resolução.
+6. Aplicar a política de confiança por trecho, sem revisar texto normal desnecessariamente:
+   - texto comum: `>=0,90` aceita; `0,75–0,89` confere com Gemini usando imagem original + recorte + OCR + contexto local; `<0,75` recompõe cuidadosamente;
+   - trecho crítico (`NÃO`, `EXCETO`, `INCORRETA`, números, datas, artigos, percentuais, símbolos e letras A–E): `>=0,95` aceita; `0,85–0,94` confere; `<0,85` recompõe;
+   - recomposição segue evidência visual > OCR Google > contexto semântico; contexto só desempata caracteres parcialmente visíveis e nunca inventa conteúdo;
+   - confiança moderada mantém a melhor leitura e não interrompe o fluxo; revisão manual só ocorre abaixo de `0,75` (ou `0,85` crítica) ou quando duas leituras plausíveis mudam a resposta;
+   - persistir `confidence`, `critical`, `review_mode`, `manual_review_required` e `uncertainty_flags` sem armazenar imagem/segredo no log de auditoria.
+
+**Aceite:** nenhuma tela ou sessão nova menciona DeepSeek, Claude ou GLM; uma questão percorre Document AI → Gemini multimodal → Gemini resolução com rastreabilidade segura e sem credenciais em logs, banco em claro, browser, APK ou artefatos CI.

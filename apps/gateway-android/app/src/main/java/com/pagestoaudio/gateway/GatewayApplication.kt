@@ -2,19 +2,25 @@ package com.pagestoaudio.gateway
 
 import android.app.Application
 import android.util.Log
+import com.pagestoaudio.gateway.BuildConfig
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import com.pagestoaudio.gateway.domain.GatewayConfig
 import com.pagestoaudio.gateway.domain.SessionRepository
 import com.pagestoaudio.gateway.network.ApiService
+import com.pagestoaudio.gateway.network.FallbackDns
 import com.pagestoaudio.gateway.network.GatewayAuthInterceptor
 import com.pagestoaudio.gateway.spool.AppDatabase
 import com.pagestoaudio.gateway.spool.SpoolRepository
 import com.pagestoaudio.gateway.sync.UploadWorker
+import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.dnsoverhttps.DnsOverHttps
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 class GatewayApplication : Application(), Configuration.Provider {
@@ -63,13 +69,31 @@ class GatewayApplication : Application(), Configuration.Provider {
 
     private fun buildOkHttpClient(): OkHttpClient {
         val logging = HttpLoggingInterceptor { msg -> Log.d("OkHttp", msg) }.apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            // BODY logging can expose signed headers and captured images. Keep it
+            // disabled in release; verbose diagnostics are debug-only.
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
+        }
+        val bootstrapClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+        val dnsOverHttps = DnsOverHttps.Builder()
+            .client(bootstrapClient)
+            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(
+                InetAddress.getByName("1.1.1.1"),
+                InetAddress.getByName("1.0.0.1")
+            )
+            .build()
+        val resilientDns = FallbackDns(Dns.SYSTEM, dnsOverHttps) { hostname, failure ->
+            Log.w(TAG, "DNS do Android falhou para $hostname; usando DNS seguro alternativo", failure)
         }
         return OkHttpClient.Builder()
+            .dns(resilientDns)
             .addInterceptor(GatewayAuthInterceptor(
                 deviceIdProvider = { config.deviceId },
                 deviceSecretProvider = { config.deviceSecret },
-                firmwareVersionProvider = { "gateway-android/1.0.0" }
+                firmwareVersionProvider = { "gateway-android/${BuildConfig.VERSION_NAME}" }
             ))
             .addInterceptor(logging)
             .connectTimeout(15, TimeUnit.SECONDS)

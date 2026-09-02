@@ -31,10 +31,17 @@ jobs:
         run: uv sync --all-extras
 
       - name: Lint
-        run: uv run ruff check src/ apps/ 2>&1 | head -100
+        run: uv run ruff check src/ apps/
 
       - name: Type check
-        run: uv run mypy src/pages_to_audio --ignore-missing-imports 2>&1 | head -100 || true
+        run: >-
+          uv run mypy src/pages_to_audio/ai
+          src/pages_to_audio/llm/providers/gemini_provider.py
+          src/pages_to_audio/ocr/providers/google_document_ai.py
+          apps/api/routers/admin_settings.py
+          apps/api/schemas/admin.py
+          src/pages_to_audio/admin/settings_service.py
+          --ignore-missing-imports
 
       - name: Unit tests
         run: uv run pytest tests/unit -q

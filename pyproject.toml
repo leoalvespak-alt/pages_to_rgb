@@ -89,6 +89,10 @@ ignore_missing_imports = true
 module = "PIL.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "google.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

@@ -5,9 +5,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ProviderName = Literal["deepseek", "gemini", "claude", "glm"]
-OcrProvider = Literal["google_document_ai", "azure", "paddle"]
-ModelName = Literal["deepseek-v4-pro", "gemini-3.1-pro", "claude-opus-5", "glm-5.3"]
+ProviderName = Literal["gemini", "google_document_ai"]
+OcrProvider = Literal["google_document_ai"]
+ModelName = Literal["gemini-3.1-pro-preview", "OCR_PROCESSOR"]
+ReasoningModelName = Literal["gemini-3.1-pro-preview"]
 
 
 class AdminLoginRequest(BaseModel):
@@ -59,17 +60,18 @@ class AdminSettingsRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     ocr_provider: OcrProvider
-    solve_model: ModelName
-    verify_model: ModelName
-    arbiter_model: ModelName
-    deepseek_api_key: str = ""
+    solve_model: ReasoningModelName
+    verify_model: ReasoningModelName
+    arbiter_model: ReasoningModelName
     gemini_api_key: str = ""
-    anthropic_api_key: str = ""
-    glm_api_key: str = ""
-    deepseek_configured: bool
+    google_document_ai_project_id: str = ""
+    google_document_ai_location: str = "us"
+    google_document_ai_processor_id: str = ""
+    google_document_ai_processor_version: str | None = None
+    google_document_ai_credentials: str = ""
     gemini_configured: bool
-    anthropic_configured: bool
-    glm_configured: bool
+    google_document_ai_configured: bool
+    google_document_ai_credentials_configured: bool
     expected_pages: int
     expected_questions: int
     handwritten_expected_questions: int
@@ -87,13 +89,19 @@ class AdminSettingsRead(BaseModel):
 class AdminSettingsUpdate(BaseModel):
     version: int = Field(ge=1)
     ocr_provider: OcrProvider | None = None
-    solve_model: ModelName | None = None
-    verify_model: ModelName | None = None
-    arbiter_model: ModelName | None = None
+    solve_model: ReasoningModelName | None = None
+    verify_model: ReasoningModelName | None = None
+    arbiter_model: ReasoningModelName | None = None
     deepseek_api_key: str | None = Field(default=None, max_length=8192)
     gemini_api_key: str | None = Field(default=None, max_length=8192)
     anthropic_api_key: str | None = Field(default=None, max_length=8192)
     glm_api_key: str | None = Field(default=None, max_length=8192)
+    google_document_ai_project_id: str | None = Field(default=None, max_length=256)
+    google_document_ai_location: str | None = Field(default=None, min_length=1, max_length=32)
+    google_document_ai_processor_id: str | None = Field(default=None, max_length=256)
+    google_document_ai_processor_version: str | None = Field(default=None, max_length=256)
+    google_document_ai_credentials: str | None = Field(default=None, max_length=32768)
+    clear_google_document_ai_credentials: bool = False
     clear_deepseek_api_key: bool = False
     clear_gemini_api_key: bool = False
     clear_anthropic_api_key: bool = False
@@ -124,6 +132,8 @@ class AdminSettingsUpdate(BaseModel):
         for name in ("deepseek", "gemini", "anthropic", "glm"):
             if getattr(self, f"clear_{name}_api_key") and getattr(self, f"{name}_api_key"):
                 raise ValueError(f"Cannot set and clear {name} key together")
+        if self.clear_google_document_ai_credentials and self.google_document_ai_credentials:
+            raise ValueError("Cannot set and clear Google Document AI credentials together")
         return self
 
 
@@ -139,6 +149,20 @@ class ProviderTestResponse(BaseModel):
     latency_ms: int
     error_code: str | None = None
     message: str | None = None
+
+
+class ProviderCatalogItem(BaseModel):
+    name: ProviderName
+    label: str
+    kind: Literal["llm", "ocr"]
+    models: list[str]
+    endpoint: str
+    secret_field: str
+    notes: str = ""
+
+
+class ProviderCatalogResponse(BaseModel):
+    providers: list[ProviderCatalogItem]
 
 
 class RgbTestRequest(BaseModel):

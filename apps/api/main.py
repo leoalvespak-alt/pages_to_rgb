@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from apps.api.middleware.request_context import RequestContextMiddleware
 from apps.api.routers import API_V1_PREFIX
 from apps.api.routers.admin_auth import router as admin_auth_router
-from apps.api.routers.admin_settings import router as admin_settings_router
 from apps.api.routers.admin_sessions import router as admin_sessions_router
+from apps.api.routers.admin_settings import router as admin_settings_router
 from apps.api.routers.gateway import router as gateway_router
 from apps.api.routers.gateway_rgb import router as gateway_rgb_router
 from apps.api.routers.handwritten import router as handwritten_router

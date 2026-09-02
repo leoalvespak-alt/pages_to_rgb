@@ -36,6 +36,7 @@ class NormalizedOCRResult:
     raw_storage_key: str
     provider: str
     model: str | None = None
+    quality_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 class OCRProvider(Protocol):

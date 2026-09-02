@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from typing import Any
 
@@ -11,6 +13,7 @@ from apps.api.dependencies import UowDep
 from apps.api.schemas.admin import (
     AdminSettingsRead,
     AdminSettingsUpdate,
+    ProviderCatalogResponse,
     ProviderTestRequest,
     ProviderTestResponse,
     RgbTestRequest,
@@ -18,8 +21,8 @@ from apps.api.schemas.admin import (
 )
 from src.pages_to_audio.admin.settings_service import (
     SettingsConflictError,
-    decrypt_secret,
     get_admin_settings_row,
+    provider_secret,
     settings_read,
     update_admin_settings,
 )
@@ -27,8 +30,18 @@ from src.pages_to_audio.auth.admin import AdminClaimsDep, AdminCsrfDep
 from src.pages_to_audio.db.models.audit_event import AuditEvent
 from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
 from src.pages_to_audio.db.models.session import Session
+from src.pages_to_audio.llm.providers.catalog import (
+    catalog_payload,
+    is_supported_model,
+)
 
 router = APIRouter(prefix="/admin/settings", tags=["admin-settings"])
+
+
+@router.get("/catalog", response_model=ProviderCatalogResponse)
+async def provider_catalog(_claims: AdminClaimsDep) -> ProviderCatalogResponse:
+    """Return the provider/model catalog used by the Admin UI."""
+    return ProviderCatalogResponse(providers=catalog_payload())
 
 
 @router.get("", response_model=AdminSettingsRead)
@@ -55,58 +68,87 @@ async def write_settings(
 
 
 def _provider_key(row: Any, provider: str) -> str:
-    column = (
-        "anthropic_api_key_encrypted" if provider == "claude" else f"{provider}_api_key_encrypted"
-    )
-    return decrypt_secret(getattr(row, column, None))
+    return provider_secret(row, provider)
 
 
 async def _probe_provider(provider: str, model: str, key: str) -> None:
     if not key:
         raise HTTPException(status_code=422, detail="Provider key is not configured")
     headers = {"Content-Type": "application/json"}
-    if provider == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        params = {"key": key}
-        payload: dict[str, Any] = {"contents": [{"parts": [{"text": "Reply OK"}]}]}
-    elif provider == "claude":
-        url = "https://api.anthropic.com/v1/messages"
-        params = {}
-        headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
-        payload = {
-            "model": model,
-            "max_tokens": 4,
-            "messages": [{"role": "user", "content": "Reply OK"}],
-        }
-    else:
-        url = (
-            "https://api.deepseek.com/chat/completions"
-            if provider == "deepseek"
-            else "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    if provider != "gemini":
+        raise HTTPException(
+            status_code=422,
+            detail="Google Document AI é validado separadamente com project/location/processor",
         )
-        params = {}
-        headers["Authorization"] = f"Bearer {key}"
-        payload = {
-            "model": model,
-            "max_tokens": 4,
-            "messages": [{"role": "user", "content": "Reply OK"}],
-        }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    params = {"key": key}
+    payload: dict[str, Any] = {
+        "contents": [{"parts": [{"text": "Reply OK"}]}],
+        "generationConfig": {"maxOutputTokens": 4, "temperature": 0},
+    }
     async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
         result = await client.post(url, params=params, headers=headers, json=payload)
         result.raise_for_status()
+
+
+async def _probe_document_ai(row: Any, credentials: str) -> None:
+    """Validate access to the configured processor without processing a document."""
+    project = str(getattr(row, "google_document_ai_project_id", "") or "")
+    location = str(getattr(row, "google_document_ai_location", "") or "")
+    processor = str(getattr(row, "google_document_ai_processor_id", "") or "")
+    if not project or not location or not processor:
+        raise HTTPException(
+            status_code=422, detail="Google Document AI project/location/processor is incomplete"
+        )
+    if not credentials:
+        raise HTTPException(status_code=422, detail="Provider key is not configured")
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        from google.oauth2 import service_account
+
+        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+
+        def load_token() -> str:
+            if credentials.lstrip().startswith("{"):
+                creds = service_account.Credentials.from_service_account_info(
+                    json.loads(credentials), scopes=scopes
+                )
+            else:
+                creds, _ = google.auth.load_credentials_from_file(credentials, scopes=scopes)
+            creds.refresh(google.auth.transport.requests.Request())
+            return str(creds.token)
+
+        token = await asyncio.to_thread(load_token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail="Google Document AI credentials could not be loaded"
+        ) from exc
+    url = f"https://{location}-documentai.googleapis.com/v1/projects/{project}/locations/{location}/processors/{processor}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Google Document AI timed out") from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in {401, 403}:
+            raise HTTPException(
+                status_code=422, detail="Google Document AI credential was rejected"
+            ) from exc
+        raise
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail="Google Document AI is unreachable") from exc
 
 
 @router.post("/test", response_model=ProviderTestResponse)
 async def test_provider(
     body: ProviderTestRequest, _claims: AdminCsrfDep, uow: UowDep
 ) -> ProviderTestResponse:
-    compatible = {
-        "deepseek": "deepseek-v4-pro",
-        "gemini": "gemini-3.1-pro",
-        "claude": "claude-opus-5",
-        "glm": "glm-5.3",
-    }
-    if compatible[body.provider] != body.model:
+    if not is_supported_model(body.provider, body.model):
         raise HTTPException(status_code=422, detail="Model is incompatible with provider")
     row = await get_admin_settings_row(uow.session)
     started = time.perf_counter()
@@ -114,7 +156,11 @@ async def test_provider(
     message: str | None = None
     ok = False
     try:
-        await _probe_provider(body.provider, body.model, _provider_key(row, body.provider))
+        key = _provider_key(row, body.provider)
+        if body.provider == "google_document_ai":
+            await _probe_document_ai(row, key)
+        else:
+            await _probe_provider(body.provider, body.model, key)
         ok = True
     except HTTPException:
         raise
