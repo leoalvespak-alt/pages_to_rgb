@@ -276,6 +276,11 @@ async def update_admin_settings(
         )
     )
     await db.flush()
+    # ``updated_at`` is populated by the database ``onupdate`` expression.
+    # Refresh it inside the active async session before the endpoint serializes
+    # the row; otherwise SQLAlchemy may attempt implicit IO during response
+    # serialization and raise ``MissingGreenlet``.
+    await db.refresh(row)
     return row
 
 

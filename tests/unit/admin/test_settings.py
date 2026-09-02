@@ -61,6 +61,7 @@ async def test_update_palette_version_and_audit(monkeypatch) -> None:  # type: i
     db = MagicMock()
     db.scalar = AsyncMock(return_value=row)
     db.flush = AsyncMock()
+    db.refresh = AsyncMock()
     db.add = MagicMock()
     new_palette = {letter: PaletteColor(rgb=(1, 2, 3)) for letter in "ABCDE"}
     result = await update_admin_settings(
@@ -92,6 +93,7 @@ async def test_masked_google_document_credential_is_preserved(monkeypatch) -> No
     db = MagicMock()
     db.scalar = AsyncMock(return_value=row)
     db.flush = AsyncMock()
+    db.refresh = AsyncMock()
     db.add = MagicMock()
     result = await update_admin_settings(
         db,
