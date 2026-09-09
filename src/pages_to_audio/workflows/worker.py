@@ -56,9 +56,34 @@ async def run_worker(settings: AppSettings | None = None) -> None:
         task_queue=cfg.TEMPORAL_TASK_QUEUE,
         namespace=cfg.TEMPORAL_NAMESPACE,
     )
+    # S02.9/A04: loop de despacho do outbox — intents PENDING/FAILED de fechamentos
+    # com Temporal indisponível são enviados com retry observável (30 s).
+    stop_dispatch = asyncio.Event()
+
+    async def _dispatch_loop() -> None:
+        from src.pages_to_audio.capture.dispatcher import dispatch_pending
+        from src.pages_to_audio.db.uow import UnitOfWork
+
+        while not stop_dispatch.is_set():
+            try:
+                async with UnitOfWork() as uow:
+                    stats = await dispatch_pending(uow.session)
+                    await uow.commit()
+                if stats["dispatched"] or stats["failed"]:
+                    logger.info("workflow_outbox_dispatch", **stats)
+            except Exception as exc:
+                logger.warning("workflow_outbox_dispatch_failed", error=str(exc)[:200])
+            try:
+                await asyncio.wait_for(stop_dispatch.wait(), timeout=30.0)
+            except TimeoutError:
+                continue
+
+    dispatch_task = asyncio.create_task(_dispatch_loop())
     try:
         await worker.run()
     finally:
+        stop_dispatch.set()
+        dispatch_task.cancel()
         cpu_executor.shutdown(wait=False)
         logger.info("temporal_worker_stopped")
 

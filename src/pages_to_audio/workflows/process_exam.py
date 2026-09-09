@@ -118,9 +118,7 @@ class ProcessExamWorkflow:
 
         if gate1_passed:
             # Step 9 — RetrieveKnowledge (§9, Gate 1 guard — Invariant 5)
-            await workflow.execute_activity(
-                retrieve_knowledge, sid, **LLM_SOLVER_ACTIVITY_OPTS
-            )
+            await workflow.execute_activity(retrieve_knowledge, sid, **LLM_SOLVER_ACTIVITY_OPTS)
 
             # Step 10 — SolveQuestions (Invariant 5: unreachable without Gate 1)
             await workflow.execute_activity(solve_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
@@ -134,9 +132,7 @@ class ProcessExamWorkflow:
             )
 
             # Step 13 — RescueFailedAnswers
-            await workflow.execute_activity(
-                rescue_failed_answers, sid, **LLM_SOLVER_ACTIVITY_OPTS
-            )
+            await workflow.execute_activity(rescue_failed_answers, sid, **LLM_SOLVER_ACTIVITY_OPTS)
 
             # Step 14 — EvaluateGate2
             gate2_result = await workflow.execute_activity(
@@ -162,9 +158,7 @@ class ProcessExamWorkflow:
 
         if gate2_passed:
             # Steps 16-19 -- TTS pipeline (Invariant 6: unreachable without Gate 2)
-            await workflow.execute_activity(
-                generate_answer_audio, sid, **LLM_SOLVER_ACTIVITY_OPTS
-            )
+            await workflow.execute_activity(generate_answer_audio, sid, **LLM_SOLVER_ACTIVITY_OPTS)
             await workflow.execute_activity(assemble_final_audio, sid, **FFMPEG_ACTIVITY_OPTS)
             await workflow.execute_activity(validate_final_audio, sid, **QUICK_ACTIVITY_OPTS)
             await workflow.execute_activity(publish_final_audio, sid, **STORAGE_ACTIVITY_OPTS)
