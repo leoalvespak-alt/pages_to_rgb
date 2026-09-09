@@ -98,9 +98,10 @@ def test_handwritten_palette_does_not_equal_default() -> None:
 
 @pytest.mark.unit
 def test_canonical_sha_with_handwritten_palette() -> None:
+    import hashlib
+
     from src.pages_to_audio.rgb.canonical import build_payload, canonical_items_bytes
     from src.pages_to_audio.rgb.schemas import RgbDefaults
-    import hashlib
 
     defaults = RgbDefaults()
     payload, raw = build_payload(

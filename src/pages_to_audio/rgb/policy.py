@@ -12,6 +12,14 @@ DEFAULT_ON_MS = 3000
 DEFAULT_OFF_MS = 5000
 MAX_SEQUENCE_ITEMS = 1000
 
+# S07/contrato §2: perfil low-power para novas sessões — publicado
+# explicitamente (brilho 12%, ligado 150 ms, intervalo 2850 ms). Payloads
+# antigos 3000/5000 ms permanecem imutáveis (cada sequência guarda os seus).
+LOW_POWER_BRIGHTNESS_PERCENT = 12
+LOW_POWER_ON_MS = 150
+LOW_POWER_OFF_MS = 2850
+RGB_PROFILE_LOW_POWER = "low-power"
+
 DEFAULT_PALETTE: dict[AnswerLetter, RgbColor] = {
     "A": RgbColor(rgb=(255, 255, 255)),
     "B": RgbColor(rgb=(255, 255, 0)),

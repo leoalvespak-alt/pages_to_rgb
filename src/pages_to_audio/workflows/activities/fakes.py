@@ -1,7 +1,7 @@
-"""Fake deterministic activities for Phase 4 — §4.3.6.
+"""Fake deterministic activities — TEST-ONLY (tests/workflows isolados).
 
-These activities read/write real session state in the DB
-but simulate the provider work with deterministic stubs.
+S05.1: proibido registrar no worker operacional. O registro operacional usa
+workflows/activities/real.py. Estes fakes nunca fabricam sucesso em produção.
 """
 
 from __future__ import annotations

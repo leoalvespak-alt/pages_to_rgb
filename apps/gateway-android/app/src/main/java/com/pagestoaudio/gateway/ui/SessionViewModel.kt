@@ -124,9 +124,11 @@ class SessionViewModel(
             Log.w(TAG, "bindCamera: previewView ainda não anexado")
             return
         }
+        // S04.1: reutiliza binding durante a sessão (sem rebind por frame/tela).
         val spoolDir = File(app.filesDir, "spool")
-        val source = PhoneCameraCaptureSource(app, owner, spoolDir, view)
-        phoneSource = source
+        val source = phoneSource ?: PhoneCameraCaptureSource(app, owner, spoolDir, view).also {
+            phoneSource = it
+        }
         val result = source.bindCamera()
         if (result.isFailure) {
             log("Falha ao vincular câmera: ${result.exceptionOrNull()?.message}")
@@ -151,11 +153,51 @@ class SessionViewModel(
             _uiState.update { it.copy(errorMessage = "Teste manuscrito só em Android") }
             return
         }
-        _uiState.update { it.copy(captureSourceLabel = label, errorMessage = if (label == "ESP32") "ESP32 não conectado — aguardando hardware (ports 8786/8787)" else null) }
+        // S03.10: modo ESP somente após serviço pronto (readiness da ponte local).
+        if (label == "ESP32" && !com.pagestoaudio.gateway.esp.EspBridgeService.isRunning) {
+            _uiState.update { it.copy(errorMessage = "Ponte ESP não pronta — serviço local 8786/8787 indisponível") }
+            log("ESP32 bloqueado: EspBridgeService não está em execução")
+            return
+        }
+        _uiState.update { it.copy(captureSourceLabel = label, errorMessage = null) }
         log("Fonte selecionada: $label")
         if (label == "ESP32") {
             unbindCamera()
             _uiState.update { it.copy(isCapturing = false) }
+        }
+    }
+
+    /** S03.10: habilita modo ESP com ForegroundService + permissões/notificação. */
+    fun enableEspBridge(): Boolean {
+        return try {
+            val intent = android.content.Intent(app, com.pagestoaudio.gateway.esp.EspBridgeService::class.java)
+            intent.action = com.pagestoaudio.gateway.esp.EspBridgeService.ACTION_START
+            androidx.core.content.ContextCompat.startForegroundService(app, intent)
+            // S04.7: retenção explícita — limpa ACKs antigos sem tocar pendências.
+            viewModelScope.launch {
+                try { spoolRepository.pruneAckedOlderThan(7) } catch (e: Exception) {
+                    Log.w(TAG, "pruneAcked falhou", e)
+                }
+            }
+            log("Ponte ESP habilitada — discovery 8786 + local 8787")
+            true
+        } catch (e: Exception) {
+            _uiState.update { it.copy(errorMessage = "Falha ao iniciar ponte ESP: ${e.message}") }
+            Log.w(TAG, "enableEspBridge falhou", e)
+            false
+        }
+    }
+
+    fun disableEspBridge() {
+        try {
+            val intent = android.content.Intent(app, com.pagestoaudio.gateway.esp.EspBridgeService::class.java)
+            intent.action = com.pagestoaudio.gateway.esp.EspBridgeService.ACTION_STOP
+            app.startService(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "disableEspBridge falhou", e)
+        }
+        if (_uiState.value.captureSourceLabel == "ESP32") {
+            _uiState.update { it.copy(captureSourceLabel = "Android") }
         }
     }
 
@@ -217,21 +259,32 @@ class SessionViewModel(
         if (_uiState.value.isEndingSession) return
         viewModelScope.launch {
             _uiState.update { it.copy(isEndingSession = true) }
-            log("Encerrando sessão $sid — aguardando spool drain…")
-            awaitSpoolDrain(sid)
+            // S04.3: parar produtor ANTES de drenar — nenhuma captura nova após drenagem.
+            stopPolling()
+            _uiState.update { it.copy(isCapturing = false) }
+            try { unbindCamera() } catch (_: Exception) {}
+            app.getSharedPreferences("close_intent", 0).edit().putString("closing_session", sid).apply()
+            log("Encerrando sessão $sid — produtor parado, drenando spool…")
+            val drained = awaitSpoolDrain(sid)
+            if (!drained) {
+                // S04.3/S04.4: timeout com pendências mantém fechamento pendente (nunca fecha).
+                _uiState.update { it.copy(isEndingSession = false, errorMessage = "Fila com pendências — fechamento pendente, tente de novo") }
+                log("Fechamento pendente: spool não drenou — sessão preservada")
+                return@launch
+            }
             val st = _uiState.value.sessionType
             val res = if (st == "HANDWRITTEN_WORD") sessionRepository.endHandwrittenSignal(sid) else sessionRepository.endSignal(sid)
+            // S04.4: Result.failure tratado efetivamente (não só try/catch).
             if (res.isSuccess) {
                 log("Sessão encerrada: $sid → LOCKED")
                 _uiState.update { it.copy(isCapturing = false, isConnected = false, isEndingSession = false, serverCommand = "STOP") }
-                stopPolling()
                 stopHeartbeat()
                 stopRgbTestPolling()
-                unbindCamera()
+                app.getSharedPreferences("close_intent", 0).edit().remove("closing_session").apply()
             } else {
                 val msg = res.exceptionOrNull()?.message ?: "erro desconhecido"
                 _uiState.update { it.copy(isEndingSession = false, errorMessage = msg) }
-                log("Falha ao encerrar: $msg")
+                log("Falha ao encerrar: $msg — intenção de fechamento preservada")
             }
         }
     }
@@ -278,9 +331,15 @@ class SessionViewModel(
                         log("Falha ao salvar spool: ${saveRes.exceptionOrNull()?.message}")
                     }
                     if (idx == frames - 1) {
+                        // S04.4/S04.6: capture-complete SOMENTE após confirmações; Result verificado.
                         val st2 = _uiState.value.sessionType
-                        if (st2 == "HANDWRITTEN_WORD") sessionRepository.captureCompleteHandwritten(sid, captureId, frames) else sessionRepository.captureComplete(sid, captureId, frames)
-                        log("capture-complete enviado: $captureId type=$st2")
+                        val cc = if (st2 == "HANDWRITTEN_WORD") sessionRepository.captureCompleteHandwritten(sid, captureId, frames) else sessionRepository.captureComplete(sid, captureId, frames)
+                        if (cc.isSuccess) {
+                            log("capture-complete enviado: $captureId type=$st2")
+                        } else {
+                            log("capture-complete FALHOU: ${cc.exceptionOrNull()?.message} — pendência preservada, sem fechar")
+                            _uiState.update { it.copy(errorMessage = cc.exceptionOrNull()?.message) }
+                        }
                     }
                     if (idx < frames - 1) delay(gapMs)
                 } catch (e: Exception) {
@@ -294,21 +353,21 @@ class SessionViewModel(
     private fun startPolling(sessionId: String, initialCursor: Long) {
         stopPolling()
         pollJob = viewModelScope.launch {
-            var cursor = initialCursor
-            _uiState.update { it.copy(isPolling = true) }
+            // S04.5: cursor recuperado de armazenamento persistente (sobrevive a reinício).
+            var cursor = loadCursor(sessionId, initialCursor)
+            _uiState.update { it.copy(isPolling = true, cursor = cursor) }
             while (isActive) {
                 try {
                     val st = _uiState.value.sessionType
                     val res = if (st == "HANDWRITTEN_WORD") sessionRepository.fetchHandwrittenCommand(sessionId, cursor, waitMs = 25000, phase = "CAPTURE") else sessionRepository.fetchCommand(sessionId, cursor, waitMs = 25000, phase = "CAPTURE")
                     if (res.isSuccess) {
                         val cmd = res.getOrNull()!!
-                        cursor = cmd.cursor
-                        _uiState.update { it.copy(cursor = cursor, serverCommand = cmd.command) }
-                        log("CMD ${cmd.command} cursor=$cursor cap=${cmd.captureId} frames=${cmd.frames}")
+                        log("CMD ${cmd.command} cursor=${cmd.cursor} cap=${cmd.captureId} frames=${cmd.frames}")
 
+                        var effectOk = true
                         when (cmd.command) {
-                            "CAPTURE_PROBE" -> handleServerCapture(cmd.captureId, CaptureMode.PROBE, cmd.frames, cmd.gapMs, sessionId)
-                            "CAPTURE_FULL" -> handleServerCapture(cmd.captureId, CaptureMode.FULL, cmd.frames, cmd.gapMs, sessionId)
+                            "CAPTURE_PROBE" -> effectOk = handleServerCapture(cmd.captureId, CaptureMode.PROBE, cmd.frames, cmd.gapMs, sessionId)
+                            "CAPTURE_FULL" -> effectOk = handleServerCapture(cmd.captureId, CaptureMode.FULL, cmd.frames, cmd.gapMs, sessionId)
                             "PAUSE" -> {
                                 _uiState.update { it.copy(isCapturing = false) }
                                 unbindCamera()
@@ -322,14 +381,25 @@ class SessionViewModel(
                             "PING" -> sessionRepository.heartbeat(sessionId, cursor = cursor)
                             "STOP" -> {
                                 log("STOP do servidor — drain + end-signal")
-                                awaitSpoolDrain(sessionId)
-                                val st2 = _uiState.value.sessionType
-                                if (st2 == "HANDWRITTEN_WORD") sessionRepository.endHandwrittenSignal(sessionId) else sessionRepository.endSignal(sessionId)
-                                _uiState.update { it.copy(isCapturing = false, serverCommand = "STOP") }
-                                unbindCamera()
-                                stopPolling()
+                                endSession()
                                 break
                             }
+                            else -> {
+                                // Comando desconhecido: nunca consome cursor (contrato §3.9).
+                                Log.w(TAG, "Comando desconhecido ${cmd.command} — cursor preservado")
+                                effectOk = false
+                            }
+                        }
+                        // S04.5: cursor avança SOMENTE após efeito durável + ACK.
+                        if (effectOk) {
+                            try {
+                                sessionRepository.ackCommand(sessionId, cmd.cursor)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "ackCommand falhou cursor=${cmd.cursor}", e)
+                            }
+                            cursor = cmd.cursor
+                            saveCursor(sessionId, cursor)
+                            _uiState.update { it.copy(cursor = cursor, serverCommand = cmd.command) }
                         }
                     } else {
                         val err = res.exceptionOrNull()?.message
@@ -346,43 +416,81 @@ class SessionViewModel(
         }
     }
 
+    private fun cursorPrefs() = app.getSharedPreferences("cmd_cursor", 0)
+
+    private fun loadCursor(sessionId: String, fallback: Long): Long {
+        return try {
+            val saved = cursorPrefs().getLong("cursor_$sessionId", -1L)
+            if (saved >= 0) saved else fallback
+        } catch (_: Exception) { fallback }
+    }
+
+    private fun saveCursor(sessionId: String, cursor: Long) {
+        try {
+            cursorPrefs().edit().putLong("cursor_$sessionId", cursor).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "saveCursor falhou", e)
+        }
+    }
+
     private suspend fun handleServerCapture(
         captureIdRaw: String?,
         mode: CaptureMode,
         frames: Int,
         gapMs: Long,
         sessionId: String
-    ) {
+    ): Boolean {
         if (_uiState.value.captureSourceLabel == "ESP32") {
             log("ESP32 não conectado — comando $mode ignorado (captureId=$captureIdRaw)")
-            return
+            return false
         }
         val source = phoneSource ?: run {
             log("Câmera não pronta para comando $mode")
-            return
+            return false
         }
         val captureId = captureIdRaw ?: "cap-${UUID.randomUUID().toString().take(8)}-${mode.name.lowercase()}"
         val n = frames.coerceIn(1, 10)
         val gap = gapMs.coerceIn(0, 5000)
+        var allOk = true
         repeat(n) { idx ->
             try {
                 val st = _uiState.value.sessionType
                 val captured = source.capture(mode, sessionId, captureId, idx)
                 val pending = source.toPendingFrame(captured, sessionId, st)
-                spoolRepository.save(pending)
-                log("${ts()} srv frame $idx/$n sha=${captured.sha256.take(12)}... ${captured.resolution}")
-                _uiState.update { it.copy(pageCount = it.pageCount + 1, lastFrameLabel = "Última: $captureId idx $idx ✓") }
+                // S04.4: Result.failure tratado efetivamente.
+                val saveRes = spoolRepository.save(pending)
+                if (saveRes.isFailure) {
+                    allOk = false
+                    log("Spool save FALHOU frame $idx: ${saveRes.exceptionOrNull()?.message} — sem captura duplicada")
+                } else {
+                    log("${ts()} srv frame $idx/$n sha=${captured.sha256.take(12)}... ${captured.resolution}")
+                    // S04.6: contador = enfileirados (ACKs chegam via UploadWorker); nunca
+                    // chama captura concluída antes das confirmações (ver abaixo).
+                    _uiState.update { it.copy(pageCount = it.pageCount + 1, lastFrameLabel = "Última: $captureId idx $idx ✓") }
+                }
                 if (idx < n - 1) delay(gap)
             } catch (e: Exception) {
+                allOk = false
                 log("Falha captura srv frame $idx: ${e.message}")
             }
         }
         try {
             val st = _uiState.value.sessionType
-            if (st == "HANDWRITTEN_WORD") sessionRepository.captureCompleteHandwritten(sessionId, captureId, n) else sessionRepository.captureComplete(sessionId, captureId, n)
+            // S04.6: só confirma conclusão quando todos os frames foram persistidos.
+            if (!allOk) {
+                log("capture-complete ADIADO: nem todos os frames persistidos p/ $captureId")
+                return false
+            }
+            val cc = if (st == "HANDWRITTEN_WORD") sessionRepository.captureCompleteHandwritten(sessionId, captureId, n) else sessionRepository.captureComplete(sessionId, captureId, n)
+            if (cc.isFailure) {
+                log("captureComplete falhou: ${cc.exceptionOrNull()?.message} — pendência preservada")
+                return false
+            }
         } catch (e: Exception) {
             Log.w(TAG, "captureComplete falhou", e)
+            return false
         }
+        return true
     }
 
     private fun startHeartbeat(sessionId: String) {
@@ -444,17 +552,18 @@ class SessionViewModel(
         _uiState.update { it.copy(rgbTest = null) }
     }
 
-    private suspend fun awaitSpoolDrain(sessionId: String, timeoutMs: Long = 30_000) {
+    private suspend fun awaitSpoolDrain(sessionId: String, timeoutMs: Long = 30_000): Boolean {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeoutMs) {
             val pending = spoolRepository.pendingCountForSession(sessionId)
             if (pending == 0) {
                 log("Spool drain completo")
-                return
+                return true
             }
             delay(1000)
         }
-        log("Spool drain timeout — prosseguindo")
+        log("Spool drain timeout — fechamento pendente, SEM fechar com pendências")
+        return false
     }
 
     private fun log(msg: String) {

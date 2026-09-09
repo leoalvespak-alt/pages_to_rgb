@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import select
+
 from src.pages_to_audio.common.errors import ReasonCode, RetryableError
 from src.pages_to_audio.observability.logging import get_logger
 
@@ -213,20 +215,18 @@ class HybridRetriever:
         discipline: str | None,
         subject: str | None,
     ) -> list[dict[str, Any]]:
-        """Stage 2: Full-text search using Portuguese tsvector."""
+        """Stage 2: Full-text search using Portuguese tsvector.
+
+        S06.4: texto livre via websearch_to_tsquery (sintaxe segura p/ pontuação)
+        + savepoint aninhado: falha de consulta nunca aborta a transação externa
+        nem retorna lista vazia como "sem resultados".
+        """
         from sqlalchemy import text as sa_text
 
-        # Build Portuguese tsquery from all query variants
-        tsquery_parts = []
-        for q in queries:
-            words = [w for w in q.split() if len(w) > 2]
-            if words:
-                tsquery_parts.append(" & ".join(words))
-
-        if not tsquery_parts:
+        # S06.4: websearch_to_tsquery entende linguagem natural com pontuação.
+        combined = " ".join(q for q in queries if q and q.strip())
+        if not combined.strip():
             return []
-
-        combined_tsquery = " | ".join(f"({p})" for p in tsquery_parts)
 
         sql = """
             SELECT
@@ -235,11 +235,11 @@ class HybridRetriever:
                 kc.text,
                 kc.page_number,
                 kd.title,
-                ts_rank(kc.fts, to_tsquery('portuguese_unaccent', :tsquery)) AS fts_score
+                ts_rank(kc.fts, websearch_to_tsquery('portuguese_unaccent', :tsquery)) AS fts_score
             FROM knowledge_chunks kc
             JOIN knowledge_documents kd ON kd.id = kc.document_id
             WHERE kd.active = true
-              AND kc.fts @@ to_tsquery('portuguese_unaccent', :tsquery)
+              AND kc.fts @@ websearch_to_tsquery('portuguese_unaccent', :tsquery)
               AND (:discipline IS NULL OR kd.discipline = :discipline)
               AND (:subject IS NULL OR kd.subject = :subject)
             ORDER BY fts_score DESC
@@ -247,18 +247,23 @@ class HybridRetriever:
         """
 
         try:
-            result = await db.execute(
-                sa_text(sql),
-                {
-                    "tsquery": combined_tsquery,
-                    "discipline": discipline,
-                    "subject": subject,
-                },
-            )
-            return [dict(row._mapping) for row in result]
+            # Savepoint: erro aqui faz rollback só deste estágio.
+            async with db.begin_nested():
+                result = await db.execute(
+                    sa_text(sql),
+                    {
+                        "tsquery": combined,
+                        "discipline": discipline,
+                        "subject": subject,
+                    },
+                )
+                return [dict(row._mapping) for row in result]
         except Exception as exc:
             logger.warning("fts_search_failed", error=str(exc))
-            return []
+            raise RetryableError(
+                f"Full-text search failed: {exc}",
+                reason_code=ReasonCode.RETRIEVAL_FAILED,
+            ) from exc
 
     async def _run_vector(
         self,
@@ -268,7 +273,11 @@ class HybridRetriever:
         subject: str | None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Stage 3: pgvector cosine similarity search."""
+        """Stage 3: pgvector cosine similarity search.
+
+        S06.3: CAST tipado do parâmetro (placeholder ambíguo nunca usado).
+        Falha propaga como erro explícito, não lista vazia.
+        """
         from sqlalchemy import text as sa_text
 
         embedding_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
@@ -280,31 +289,35 @@ class HybridRetriever:
                 kc.text,
                 kc.page_number,
                 kd.title,
-                1 - (kc.embedding <=> :embedding::vector) AS vector_score
+                1 - (kc.embedding <=> CAST(:embedding AS vector)) AS vector_score
             FROM knowledge_chunks kc
             JOIN knowledge_documents kd ON kd.id = kc.document_id
             WHERE kd.active = true
               AND kc.embedding IS NOT NULL
               AND (:discipline IS NULL OR kd.discipline = :discipline)
               AND (:subject IS NULL OR kd.subject = :subject)
-            ORDER BY kc.embedding <=> :embedding::vector
+            ORDER BY kc.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """
 
         try:
-            result = await db.execute(
-                sa_text(sql),
-                {
-                    "embedding": embedding_str,
-                    "discipline": discipline,
-                    "subject": subject,
-                    "limit": limit,
-                },
-            )
-            return [dict(row._mapping) for row in result]
+            async with db.begin_nested():
+                result = await db.execute(
+                    sa_text(sql),
+                    {
+                        "embedding": embedding_str,
+                        "discipline": discipline,
+                        "subject": subject,
+                        "limit": limit,
+                    },
+                )
+                return [dict(row._mapping) for row in result]
         except Exception as exc:
             logger.warning("vector_search_failed", error=str(exc))
-            return []
+            raise RetryableError(
+                f"Vector search failed: {exc}",
+                reason_code=ReasonCode.RETRIEVAL_FAILED,
+            ) from exc
 
     async def _rerank(
         self,
@@ -336,3 +349,40 @@ def build_retriever(
         rrf_k=rrf_k,
         reranker_enabled=reranker_enabled,
     )
+
+
+async def retrieve_for_session(db_session: Any, session: Any) -> dict[str, Any]:
+    """S05/S06: recuperação por sessão para o workflow (falha explícita, nunca vazia mascarada)."""
+    from src.pages_to_audio.config.settings import get_settings
+    from src.pages_to_audio.db.models.question import Question
+
+    settings = get_settings()
+    if settings.EMBEDDING_PROVIDER == "openai":
+        from src.pages_to_audio.llm.providers.openai_embedding import OpenAIEmbeddingProvider
+
+        provider: Any = OpenAIEmbeddingProvider(settings)
+    else:
+        from src.pages_to_audio.llm.providers.fake_embedding import FakeEmbeddingProvider
+
+        provider = FakeEmbeddingProvider(dimension=settings.EMBEDDING_DIMENSION)
+    retriever = HybridRetriever(provider, top_k=5, rrf_k=settings.RAG_RRF_K)
+    questions = (
+        (
+            await db_session.execute(
+                select(Question).where(
+                    Question.session_id == session.id, Question.status == "READY"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    total_hits = 0
+    question_list = list(questions)
+    for question in question_list:
+        query_text = getattr(question, "text", None) or f"question {question.question_number}"
+        result = await retriever.retrieve(
+            str(question.id), str(query_text), db_session=db_session, top_k=5
+        )
+        total_hits += len(result.hits)
+    return {"questions": len(question_list), "retrieved": total_hits}

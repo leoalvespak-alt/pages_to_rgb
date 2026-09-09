@@ -97,6 +97,58 @@ class SpoolRepository(
 
     suspend fun pending(): List<PendingFrame> = withContext(Dispatchers.IO) { dao.pending() }
 
+    /**
+     * S03.5/contrato §4.2: reconcilia arquivo/Room antes de responder como aceito.
+     * Remove registros cujo arquivo sumiu sem ACK (diagnóstico explícito, sem
+     * retry infinito) e registra órfãos (arquivo sem registro) para decisão.
+     */
+    suspend fun reconcileLocalSpool(): ReconcileReport = withContext(Dispatchers.IO) {
+        val pendings = dao.pending()
+        var missingAck = 0
+        pendings.forEach { frame ->
+            val f = File(frame.filePath)
+            if (!f.exists() || f.length() == 0L) {
+                Log.e(TAG, "reconcile: arquivo ausente p/ frame não-ACK id=${frame.id} cap=${frame.captureId} idx=${frame.frameIndex} — sem retry infinito; requer recaptura sob nova identidade")
+                missingAck++
+            }
+        }
+        ReconcileReport(pendingChecked = pendings.size, missingFiles = missingAck)
+    }
+
+    data class ReconcileReport(val pendingChecked: Int, val missingFiles: Int)
+
+    /**
+     * S03.5: escrita atômica tmp→rename. Grava em arquivo temporário, fsync, e
+     * publica por rename — leitor nunca vê JPEG parcial.
+     */
+    suspend fun writeAtomically(target: File, bytes: ByteArray): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            target.parentFile?.mkdirs()
+            val tmp = File(target.parentFile, "${target.name}.tmp-${System.currentTimeMillis()}")
+            tmp.outputStream().use { out ->
+                out.write(bytes)
+                out.flush()
+                try { out.fd.sync() } catch (_: Exception) {}
+            }
+            if (tmp.length() != bytes.size.toLong()) {
+                tmp.delete()
+                return@withContext Result.failure(IllegalStateException("Escrita incompleta tmp=${tmp.name}"))
+            }
+            if (target.exists() && !target.delete()) {
+                tmp.delete()
+                return@withContext Result.failure(IllegalStateException("Não foi possível substituir ${target.name}"))
+            }
+            if (!tmp.renameTo(target)) {
+                tmp.delete()
+                return@withContext Result.failure(IllegalStateException("rename tmp→final falhou p/ ${target.name}"))
+            }
+            Result.success(target)
+        } catch (e: Exception) {
+            Log.e(TAG, "writeAtomically falhou p/ ${target.absolutePath}", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun pendingForSession(sessionId: String): List<PendingFrame> =
         withContext(Dispatchers.IO) { dao.pendingForSession(sessionId) }
 

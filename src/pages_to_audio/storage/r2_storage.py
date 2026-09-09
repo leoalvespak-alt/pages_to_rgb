@@ -20,7 +20,7 @@ _IMMUTABLE_BUCKETS = {"pages-to-rgb-originals", "pages-originals"}
 
 
 class R2StorageAdapter:
-    """S3/R2 adapter com fallback in-memory para testes offline."""
+    """S3/R2 adapter. S02.4: sem fallback silencioso em produção."""
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -54,8 +54,34 @@ class R2StorageAdapter:
                 self._client_error = exc
                 self._client = None
 
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
+
+    def _require_real_in_production(self) -> None:
+        if self._use_fallback() and get_settings().APP_ENV == "production":
+            raise StorageError(
+                "R2 indisponível em produção; fallback em memória proibido",
+                reason_code=ReasonCode.STORAGE_UPLOAD_FAILED,
+            )
+
     def _use_fallback(self) -> bool:
         return self._client is None
+
+    def _is_immutable_logical(self, logical_bucket: str) -> bool:
+        """S02.5/A32: imutabilidade por papel lógico, inclusive nomes customizados.
+
+        Cobre o nome lógico ("pages-originals"), o nome físico resolvido e os
+        nomes físicos legados — nunca depende só do nome resolvido.
+        """
+        if logical_bucket == "pages-originals":
+            return True
+        resolved_originals = {
+            self._bucket_originals,
+            "pages-to-rgb-originals",
+            "pages-originals",
+        }
+        return logical_bucket in resolved_originals
 
     def _resolve_bucket(self, bucket: str) -> str:
         mapping = {
@@ -78,17 +104,19 @@ class R2StorageAdapter:
         sha256: str,
         overwrite: bool = False,
     ) -> StoredObject:
-        bucket = self._resolve_bucket(bucket)
-        if not overwrite and bucket in _IMMUTABLE_BUCKETS:
-            if await self.object_exists(bucket, key):
-                raise StorageOverwriteForbidden(bucket, key)
+        logical = bucket
+        resolved = self._resolve_bucket(bucket)
+        if not overwrite and self._is_immutable_logical(logical):
+            if await self.object_exists(logical, key):
+                raise StorageOverwriteForbidden(resolved, key)
         if self._use_fallback():
-            k = (bucket, key)
-            if not overwrite and bucket in _IMMUTABLE_BUCKETS and k in self._fallback_store:
-                raise StorageOverwriteForbidden(bucket, key)
+            self._require_real_in_production()
+            k = (resolved, key)
+            if not overwrite and self._is_immutable_logical(logical) and k in self._fallback_store:
+                raise StorageOverwriteForbidden(resolved, key)
             self._fallback_store[k] = data
             return StoredObject(
-                bucket=bucket,
+                bucket=resolved,
                 key=key,
                 sha256=sha256,
                 size_bytes=len(data),
@@ -113,31 +141,45 @@ class R2StorageAdapter:
             raise StorageError(
                 f"R2 upload failed: {exc}", reason_code=ReasonCode.STORAGE_UPLOAD_FAILED
             ) from exc
-        if not await self.object_exists(bucket, key):
+        if not await self.object_exists(logical, key):
             raise StorageError(
                 "Object not found after upload", reason_code=ReasonCode.STORAGE_UPLOAD_FAILED
             )
         return StoredObject(
-            bucket=bucket, key=key, sha256=sha256, size_bytes=len(data), content_type=content_type
+            bucket=resolved, key=key, sha256=sha256, size_bytes=len(data), content_type=content_type
         )
 
     async def object_exists(self, bucket: str, key: str) -> bool:
-        bucket = self._resolve_bucket(bucket)
+        resolved = self._resolve_bucket(bucket)
         if self._use_fallback():
-            return (bucket, key) in self._fallback_store
+            return (resolved, key) in self._fallback_store
         import asyncio
 
         def _head() -> bool:
             assert self._client is not None
             try:
-                self._client.head_object(Bucket=bucket, Key=key)
+                self._client.head_object(Bucket=resolved, Key=key)
                 return True
             except Exception as exc:
-                # botocore ClientError 404 -> False
+                # S02.5: só 404/NoSuchKey é inexistência; outro erro propaga
+                # (nunca interpretar erro genérico de HEAD como ausente).
+                from botocore.exceptions import ClientError
+
+                if isinstance(exc, ClientError):
+                    code = str(exc.response.get("Error", {}).get("Code", ""))
+                    if code in {"404", "NoSuchKey", "NotFound"}:
+                        return False
+                    raise StorageError(
+                        f"R2 HEAD failed: {code}",
+                        reason_code=ReasonCode.STORAGE_UPLOAD_FAILED,
+                    ) from exc
                 msg = str(exc)
-                if "404" in msg or "Not Found" in msg or "NoSuchKey" in msg:
+                if "404" in msg or "NoSuchKey" in msg:
                     return False
-                return False
+                raise StorageError(
+                    f"R2 HEAD failed: {exc}",
+                    reason_code=ReasonCode.STORAGE_UPLOAD_FAILED,
+                ) from exc
 
         return await asyncio.to_thread(_head)
 

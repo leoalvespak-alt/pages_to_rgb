@@ -47,23 +47,16 @@ class GoogleDocumentAIProvider:
         self._endpoint = f"https://{self._location}-documentai.googleapis.com/v1/projects/{self._project}/locations/{self._location}/{processor_path}:process"
 
     async def _get_access_token(self) -> str:
-        import google.auth
-        import google.auth.transport.requests
+        # S05.7: rotina compartilhada (JSON ou caminho) + refresh em thread com reuso.
+        from src.pages_to_audio.ocr.credentials import (
+            get_google_access_token,
+            load_google_credentials,
+        )
 
-        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-        if self._credentials_json:
-            from google.oauth2 import service_account
-
-            creds = service_account.Credentials.from_service_account_info(
-                __import__("json").loads(self._credentials_json), scopes=scopes
-            )
-        else:
-            if not self._creds_file:
-                raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS is not configured")
-            creds, _ = google.auth.load_credentials_from_file(self._creds_file, scopes=scopes)
-        request = google.auth.transport.requests.Request()
-        creds.refresh(request)
-        return str(creds.token)
+        creds = load_google_credentials(
+            self._credentials_json, file_fallback=self._creds_file or None
+        )
+        return await get_google_access_token(creds)
 
     async def analyze_page(self, request: OCRRequest) -> NormalizedOCRResult:
         try:
@@ -131,7 +124,15 @@ class GoogleDocumentAIProvider:
 
         try:
             data: dict[str, Any] = resp.json()
-            return self._normalize(data, request)
+            result = self._normalize(data, request)
+            # S05.8/A28: persiste artefato OCR bruto real sob a sessão correta
+            # antes de anunciar sua chave (nunca sessions/unknown).
+            raw_key = await self._persist_raw_artifact(request, data)
+            from dataclasses import replace as _replace
+
+            return _replace(result, raw_storage_key=raw_key)
+        except (NonRetryableError, RetryableError):
+            raise
         except Exception as exc:
             raise NonRetryableError(
                 f"Google DocumentAI invalid response schema: {exc}",
@@ -199,6 +200,7 @@ class GoogleDocumentAIProvider:
 
         avg_confidence = confidence_sum / confidence_count if confidence_count else 0.0
 
+        session_hint = str(request.hints.get("session_public_id") or "pending")
         return NormalizedOCRResult(
             text=text,
             blocks=blocks,
@@ -208,11 +210,36 @@ class GoogleDocumentAIProvider:
             tables=tables,
             formulas=formulas,
             confidence=avg_confidence,
-            raw_storage_key=f"sessions/unknown/ocr/google/{request.page_index}.json",
+            raw_storage_key=f"sessions/{session_hint}/ocr/google/{request.page_index}.json",
             provider="google_document_ai",
             model="OCR_PROCESSOR",
             quality_metrics=quality_metrics,
         )
+
+    async def _persist_raw_artifact(self, request: OCRRequest, data: dict[str, Any]) -> str:
+        """S05.8: grava JSON bruto e retorna chave real (sessão correta)."""
+        import json as _json
+
+        from src.pages_to_audio.storage.keys import ocr_raw_key
+
+        session_hint = str(request.hints.get("session_public_id") or "pending")
+        key = ocr_raw_key(session_hint, "google", request.page_index)
+        storage = self._storage
+        if storage is None:
+            from src.pages_to_audio.storage import get_storage_adapter
+
+            storage = get_storage_adapter()
+            self._storage = storage
+        raw = _json.dumps(data, ensure_ascii=False).encode("utf-8")
+        await storage.put_object(
+            "ocr-raw",
+            key,
+            raw,
+            "application/json",
+            sha256=__import__("hashlib").sha256(raw).hexdigest(),
+            overwrite=True,
+        )
+        return key
 
     @staticmethod
     def _anchor_text(anchor: Any, document_text: str) -> str:

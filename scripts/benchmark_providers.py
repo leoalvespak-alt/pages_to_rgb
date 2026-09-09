@@ -16,7 +16,7 @@ import asyncio
 import json
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.pages_to_audio.llm.providers.fake_embedding import FakeEmbeddingProvider
 from src.pages_to_audio.rag.chunking import chunk_document
-from src.pages_to_audio.rag.retrieval import HybridRetriever, reciprocal_rank_fusion
-
+from src.pages_to_audio.rag.retrieval import reciprocal_rank_fusion
 
 SAMPLE_CORPUS = [
     {

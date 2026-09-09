@@ -70,7 +70,11 @@ async def _synthesize_speech(
 
 
 async def _run_ffmpeg(args: list[str]) -> bytes:
-    """Execute FFmpeg, return stdout bytes. §9.4.3: no shell=True, 120s timeout."""
+    """Execute FFmpeg, return stdout bytes. §9.4.3: no shell=True, 120s timeout.
+
+    S05.12/A31: término e reap em timeout/cancelamento — kill + wait colhem o
+    zombie e fecham pipes associados.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -78,15 +82,30 @@ async def _run_ffmpeg(args: list[str]) -> bytes:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_FFMPEG_TIMEOUT_S)
-    except TimeoutError as exc:
-        raise NonRetryableError(
-            f"FFmpeg timed out after {_FFMPEG_TIMEOUT_S}s",
-            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
-        ) from exc
     except FileNotFoundError as exc:
         raise NonRetryableError(
             "ffmpeg not found in PATH",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_FFMPEG_TIMEOUT_S)
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10.0)
+        except (TimeoutError, ProcessLookupError):
+            pass
+        for pipe in (proc.stdout, proc.stderr):
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except Exception as exc:
+                logger.warning("ffmpeg_pipe_close_failed", error=str(exc)[:120])
+        raise NonRetryableError(
+            f"FFmpeg timed out after {_FFMPEG_TIMEOUT_S}s (terminated)",
             reason_code=ReasonCode.TTS_PROVIDER_FAILED,
         ) from exc
 

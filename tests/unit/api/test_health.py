@@ -19,9 +19,16 @@ def test_liveness_200(client: TestClient) -> None:
 
 
 def test_readiness_200(client: TestClient) -> None:
+    # S08.1/A06: readiness reflete dependências — 200 ready ou 503 not_ready,
+    # nunca 200 genérico com checks vazios.
     r = client.get("/api/v1/health/ready")
-    assert r.status_code == 200
-    assert r.json()["status"] == "ready"
+    assert r.status_code in (200, 503)
+    body = r.json()
+    assert body["status"] in ("ready", "not_ready")
+    assert "checks" in body
+    assert set(body["checks"]) >= {"database", "storage", "temporal", "outbox"}
+    if r.status_code == 503:
+        assert body["failing"]
 
 
 def test_dependencies_shape(client: TestClient) -> None:
@@ -31,8 +38,9 @@ def test_dependencies_shape(client: TestClient) -> None:
     assert "dependencies" in data
     deps = data["dependencies"]
     assert "database" in deps
-    assert "supabase_storage" in deps
+    assert "storage" in deps
     assert "temporal" in deps
+    assert "workflow_outbox" in deps
     for dep in deps.values():
         assert "status" in dep
         assert "checked_at" in dep

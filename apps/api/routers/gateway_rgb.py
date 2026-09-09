@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.dependencies import UowDep
 from src.pages_to_audio.auth.gateway import verify_gateway_token
+from src.pages_to_audio.common.contract_ids import (
+    ESP_ID_PATTERN,
+    ESP_SEQUENCE_PATTERN,
+    MAX_EXACT_CURSOR,
+)
 from src.pages_to_audio.rgb.delivery import (
     RgbApiError,
     get_sequence_for_binding,
@@ -30,7 +35,7 @@ class ResultPollResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: RgbResultCommand
-    cursor: int = Field(ge=0, strict=True)
+    cursor: int = Field(ge=0, le=MAX_EXACT_CURSOR, strict=True)
     session_id: str
     sequence_id: str | None = None
     revision: int | None = Field(default=None, ge=1, strict=True)
@@ -41,12 +46,12 @@ class ResultPollResponse(BaseModel):
 class RgbSequenceEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    device_id: str = Field(min_length=1, max_length=128)
-    session_id: str = Field(min_length=1, max_length=128)
+    device_id: str = Field(min_length=1, max_length=63, pattern=ESP_ID_PATTERN)
+    session_id: str = Field(min_length=1, max_length=63, pattern=ESP_ID_PATTERN)
     sequence_id: str = Field(
         min_length=1,
         max_length=64,
-        pattern=r"^[A-Za-z0-9_-]+$",
+        pattern=ESP_SEQUENCE_PATTERN,
     )
     revision: int = Field(ge=1, strict=True)
     event: RgbEventName
@@ -68,8 +73,8 @@ async def get_result(
     session_id: str,
     uow: UowDep,
     gateway_code: GatewayIdDep,
-    device_id: str = Query(min_length=1, max_length=128),
-    cursor: int = Query(default=0, ge=0),
+    device_id: str = Query(min_length=1, max_length=63, pattern=ESP_ID_PATTERN),
+    cursor: int = Query(default=0, ge=0, le=MAX_EXACT_CURSOR),
 ) -> ResultPollResponse | Response:
     try:
         binding = await get_session_binding(
@@ -103,8 +108,8 @@ async def download_rgb_sequence(
     session_id: str,
     uow: UowDep,
     gateway_code: GatewayIdDep,
-    device_id: str = Query(min_length=1, max_length=128),
-    sequence_id: str = Query(min_length=1, max_length=64),
+    device_id: str = Query(min_length=1, max_length=63, pattern=ESP_ID_PATTERN),
+    sequence_id: str = Query(min_length=1, max_length=64, pattern=ESP_SEQUENCE_PATTERN),
 ) -> Response:
     try:
         binding = await get_session_binding(

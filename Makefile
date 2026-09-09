@@ -1,7 +1,7 @@
 .PHONY: install dev test test-unit test-integration lint typecheck migrate migration api worker stack-up stack-down admin simulator e2e benchmark
 
 install:
-	uv sync --all-extras
+	uv sync --all-extras --all-groups
 
 dev:
 	uv run uvicorn apps.api.main:create_app --factory --reload --host 0.0.0.0 --port 8000
@@ -42,7 +42,7 @@ stack-down:
 	docker compose -f infra/docker-compose.dev.yml down
 
 admin:
-	@echo "Admin panel disponível a partir da FASE 10"; exit 1
+	cd apps/admin && npm ci && npm run typecheck && npm test && npm run build
 
 simulator:
 	uv run python scripts/simulate_android.py
@@ -51,4 +51,4 @@ e2e:
 	uv run pytest tests/e2e/ -m e2e
 
 benchmark:
-	@echo "Benchmark disponível a partir da FASE 7"; exit 1
+	uv run python scripts/benchmark_providers.py

@@ -248,14 +248,26 @@ async def mark_result_processing(
     db: AsyncSession,
     binding: SessionBinding,
 ) -> SessionResultDelivery:
-    """Make an active workflow visible to the next firmware poll."""
+    """Make an active workflow visible to the next firmware poll.
 
+    S02.10/A18: cerca de cancelamento — sessão CANCELLED nunca regride para
+    PROCESSING; entrega CANCELLED existente é preservada.
+    """
+    try:
+        if SessionState(binding.session.status) == SessionState.CANCELLED:
+            return await get_or_create_delivery(
+                db, binding, command=RgbResultCommand.RESULT_CANCELLED, reason_code="CANCELLED"
+            )
+    except ValueError:
+        pass
     current = await db.scalar(
         select(SessionResultDelivery).where(
             SessionResultDelivery.session_id == binding.session.id,
         )
     )
     if current is not None and current.command == RgbResultCommand.RGB_SEQUENCE_READY.value:
+        return current
+    if current is not None and current.command == RgbResultCommand.RESULT_CANCELLED.value:
         return current
     return await get_or_create_delivery(
         db,
@@ -283,7 +295,9 @@ async def result_snapshot(
         command = derive_command(binding.session)
         if cursor >= 1:
             return None
-        return ResultSnapshot(command=command, cursor=1, session_id=binding.session.public_id)
+        # S02/A17: cursor virtual inicial 0; primeira transição real começa em 1.
+        # snapshot virtual usa cursor 0 para não colidir com o primeiro PROCESSING.
+        return ResultSnapshot(command=command, cursor=0, session_id=binding.session.public_id)
 
     if cursor >= delivery.cursor:
         return None

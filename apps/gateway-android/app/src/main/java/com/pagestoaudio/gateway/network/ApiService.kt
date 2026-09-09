@@ -43,6 +43,12 @@ interface ApiService {
         @Query("phase") phase: String = "CAPTURE"
     ): Response<CommandResponse>
 
+    @POST("gateway/session/{id}/command/ack")
+    suspend fun ackCommand(
+        @Path("id") sessionId: String,
+        @Body body: CommandAckRequest
+    ): Response<Unit>
+
     // ── Upload de frame — multipart com JPEG bruto, headers X-* obrigatórios ─────
 
     @retrofit2.http.Multipart
@@ -164,8 +170,9 @@ data class StartSessionRequest(
     @SerializedName("capture_source") val captureSource: String = "ANDROID_CAMERA",
     @SerializedName("allow_new_session") val allowNewSession: Boolean = true,
     @SerializedName("resume_hint") val resumeHint: String? = null,
-    @SerializedName("gateway_code") val gatewayCode: String? = null,
+    @SerializedName("resume_requested") val resumeRequested: Boolean = false,
     @SerializedName("last_session_id") val lastSessionId: String? = null,
+    @SerializedName("gateway_code") val gatewayCode: String? = null,
     @SerializedName("reset_reason") val resetReason: String? = null,
     @SerializedName("trigger") val trigger: String? = null
 )
@@ -218,13 +225,18 @@ data class PolicyProfile(
 )
 
 data class CommandResponse(
-    @SerializedName("command") val command: String, // CAPTURE_PROBE | CAPTURE_FULL | PAUSE | RESUME | PING | STOP
+    @SerializedName("command") val command: String, // CAPTURE_PROBE | CAPTURE_FULL | PAUSE | RESUME | PING | STOP (fechado no servidor)
     @SerializedName("cursor") val cursor: Long,
+    @SerializedName("session_id") val sessionId: String? = null,
     @SerializedName("capture_id") val captureId: String? = null,
     @SerializedName("frames") val frames: Int = 1,
     @SerializedName("gap_ms") val gapMs: Long = 180,
     @SerializedName("frame_size") val frameSize: String? = null,
     @SerializedName("jpeg_quality") val jpegQuality: Int? = null
+)
+
+data class CommandAckRequest(
+    @SerializedName("cursor") val cursor: Long
 )
 
 data class FrameUploadResponse(
@@ -254,8 +266,10 @@ data class EndSignalResponse(
 )
 
 data class SessionResultResponse(
-    @SerializedName("status") val status: String, // RESULT_NOT_STARTED | RESULT_PROCESSING | RGB_SEQUENCE_READY | RESULT_CANCELLED
+    // S01.1/A03: servidor usa `command` (não `status`); string de respostas "ABCDE".
+    @SerializedName("command") val command: String, // RESULT_NOT_STARTED | RESULT_PROCESSING | RGB_SEQUENCE_READY | RESULT_CANCELLED
     @SerializedName("cursor") val cursor: Long = 0,
+    @SerializedName("session_id") val sessionId: String? = null,
     @SerializedName("sequence_id") val sequenceId: String? = null,
     @SerializedName("revision") val revision: Int? = null,
     @SerializedName("item_count") val itemCount: Int? = null,
@@ -264,10 +278,13 @@ data class SessionResultResponse(
 
 data class RgbSequenceResponse(
     @SerializedName("schema_version") val schemaVersion: Int = 1,
+    @SerializedName("session_id") val sessionId: String? = null,
     @SerializedName("sequence_id") val sequenceId: String,
     @SerializedName("revision") val revision: Int,
-    @SerializedName("answers") val answers: List<String>,
+    // S01.1/A03: protocolo usa string contígua "ABCDE" (não lista).
+    @SerializedName("answers") val answers: String,
     @SerializedName("sha256") val sha256: String,
+    @SerializedName("item_count") val itemCount: Int? = null,
     @SerializedName("palette") val palette: Map<String, Any>? = null
 )
 
@@ -281,9 +298,12 @@ data class RgbTestCommandResponse(
 
 data class RgbEventRequest(
     @SerializedName("device_id") val deviceId: String,
+    @SerializedName("session_id") val sessionId: String,
     @SerializedName("sequence_id") val sequenceId: String,
     @SerializedName("revision") val revision: Int,
-    @SerializedName("event") val event: String // RECEIVED | STARTED | RESUMED | COMPLETED | INVALID
+    @SerializedName("event") val event: String, // RECEIVED | STARTED | RESUMED | COMPLETED | INVALID
+    @SerializedName("next_index") val nextIndex: Int,
+    @SerializedName("item_count") val itemCount: Int
 )
 
 data class RgbEventResponse(

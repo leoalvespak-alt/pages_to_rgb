@@ -92,6 +92,17 @@ async def process_question(
             flags = [str(flag) for flag in raw_flags]
             final_confidence = initial.score
             final_decision = finalize_review(final_confidence, consolidated)
+    answer = None
+    if final_decision.manual_review_required:
+        # S05.9/A29: revisão manual governa o pipeline — nunca chama o resolvedor
+        # quando a questão exige revisão humana.
+        from src.pages_to_audio.common.errors import NonRetryableError, ReasonCode
+
+        raise NonRetryableError(
+            "Question requires manual review — automatic resolution refused",
+            reason_code=ReasonCode.MANUAL_REVIEW_REQUIRED,
+            http_status=409,
+        )
     answer = await gemini.solve(
         SolveRequest(
             question_number=question_number,

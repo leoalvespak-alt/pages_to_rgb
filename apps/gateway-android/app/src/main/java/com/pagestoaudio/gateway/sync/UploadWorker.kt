@@ -35,6 +35,8 @@ class UploadWorker(
         const val KEY_FRAME_ID = "frame_id"
         const val KEY_SESSION_ID = "session_id"
         private val MEDIA_JPEG = "image/jpeg".toMediaType()
+        // S03.7: teto de tentativas — sem retry infinito sem diagnóstico/resolução.
+        const val MAX_ATTEMPTS = 25
     }
 
     override suspend fun doWork(): Result {
@@ -57,8 +59,14 @@ class UploadWorker(
         val file = File(frame.filePath)
         if (!file.exists() || file.length() == 0L) {
             Log.e(TAG, "Arquivo spool inexistente/vazio: ${frame.filePath} id=${frame.id}")
-            // Falha permanente — não adianta retry sem arquivo
+            // Falha permanente — não adianta retry sem arquivo (S03.7: sem loop infinito)
             return Result.failure(errorData("file missing: ${frame.filePath}"))
+        }
+
+        // S03.7: teto observável — após MAX_ATTEMPTS, falha permanente com diagnóstico.
+        if (frame.attempts >= MAX_ATTEMPTS) {
+            Log.e(TAG, "Teto de tentativas atingido ($MAX_ATTEMPTS) id=${frame.id} — erro permanente, sem retry infinito")
+            return Result.failure(errorData("max attempts $MAX_ATTEMPTS reached id=${frame.id}"))
         }
 
         // Recalcular SHA-256 via streaming para garantir integridade antes do envio
@@ -76,6 +84,8 @@ class UploadWorker(
 
         val api = apiService ?: run {
             Log.e(TAG, "ApiService não injetado — retry. Configure WorkerFactory com ApiService.")
+            try { dao.incrementAttempts(frame.id) } catch (_: Exception) {}
+            // S03.7: sem retry infinito sem diagnóstico — o teto acima converte em falha.
             return Result.retry()
         }
 

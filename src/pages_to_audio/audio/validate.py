@@ -31,7 +31,11 @@ class AudioValidationError(Exception):
 
 
 async def _ffprobe_duration(audio_data: bytes) -> float:
-    """Use ffprobe to get duration from raw audio bytes via pipe."""
+    """Use ffprobe to get duration from raw audio bytes via pipe.
+
+    S05.12: término/reap em timeout; FileNotFound/Timeout propagam como erro
+    explícito (nunca 0.0 mascarado como "sem duração").
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffprobe",
@@ -46,21 +50,44 @@ async def _ffprobe_duration(audio_data: bytes) -> float:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+    except FileNotFoundError as exc:
+        raise NonRetryableError(
+            "ffprobe not found in PATH",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
+    try:
         stdout, _ = await asyncio.wait_for(
             proc.communicate(input=audio_data), timeout=_FFMPEG_TIMEOUT_S
         )
-    except (TimeoutError, FileNotFoundError):
-        return 0.0
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10.0)
+        except (TimeoutError, ProcessLookupError):
+            pass
+        raise NonRetryableError(
+            "ffprobe timed out (terminated)",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
 
     try:
         data = json.loads(stdout)
         return float(data.get("format", {}).get("duration", 0.0))
-    except (json.JSONDecodeError, ValueError):
-        return 0.0
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise NonRetryableError(
+            f"ffprobe returned invalid JSON: {exc}",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
 
 
 async def _detect_silence(audio_data: bytes) -> list[dict[str, float]]:
-    """Run FFmpeg silencedetect filter on audio bytes, return detected silence intervals."""
+    """Run FFmpeg silencedetect filter on audio bytes, return detected silence intervals.
+
+    S05.12: timeout propaga erro explícito (nunca [] mascarado como "sem silêncio").
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -75,11 +102,28 @@ async def _detect_silence(audio_data: bytes) -> list[dict[str, float]]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+    except FileNotFoundError as exc:
+        raise NonRetryableError(
+            "ffmpeg not found in PATH",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
+    try:
         _, stderr = await asyncio.wait_for(
             proc.communicate(input=audio_data), timeout=_FFMPEG_TIMEOUT_S
         )
-    except (TimeoutError, FileNotFoundError):
-        return []
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10.0)
+        except (TimeoutError, ProcessLookupError):
+            pass
+        raise NonRetryableError(
+            "ffmpeg silencedetect timed out (terminated)",
+            reason_code=ReasonCode.TTS_PROVIDER_FAILED,
+        ) from exc
 
     silences: list[dict[str, float]] = []
     lines = stderr.decode(errors="replace").splitlines()

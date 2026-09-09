@@ -60,3 +60,32 @@ def test_hash_mismatch_is_rejected() -> None:
     invalid = payload.model_copy(update={"sha256": hashlib.sha256(b"wrong").hexdigest()})
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         validate_payload_sha256(invalid)
+
+
+def test_low_power_profile_vector_is_separate_from_legacy() -> None:
+    """S07.2/contrato §2: fixture do perfil 12%/150/2850 sem editar o vetor antigo."""
+    from src.pages_to_audio.rgb.policy import (
+        LOW_POWER_OFF_MS,
+        LOW_POWER_ON_MS,
+        RGB_PROFILE_LOW_POWER,
+    )
+
+    assert RGB_PROFILE_LOW_POWER == "low-power"
+    payload, _ = build_payload(
+        session_id="S-1",
+        sequence_id="rgb-lowpower",
+        revision=1,
+        answers="ABCDE",
+        defaults=RgbDefaults(
+            brightness_percent=12, on_ms=LOW_POWER_ON_MS, off_ms=LOW_POWER_OFF_MS
+        ),
+        palette={key: value.model_copy(deep=True) for key, value in DEFAULT_PALETTE.items()},
+    )
+    assert payload.defaults.on_ms == 150
+    assert payload.defaults.off_ms == 2850
+    expected_first = struct.pack("<BBBBBII", ord("A"), 255, 255, 255, 12, 150, 2850)
+    assert canonical_items_bytes(payload)[:13] == expected_first
+    validate_payload_sha256(payload)
+    # Vetor legado permanece intacto (3000/5000).
+    legacy, _ = _build("ABCDE")
+    assert legacy.sha256 == "6f2f655b4ea2ee02ee009a938cc95515f6ff38309b3b2ddcb0594057a5151f17"

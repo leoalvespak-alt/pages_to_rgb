@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- S03.1/S03.10 — ponte ESP local em ForegroundService -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -42,6 +49,12 @@
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="remove" />
+
+        <!-- S03.1 — ponte local ESP (discovery 8786 + HTTP 8787). -->
+        <service
+            android:name=".esp.EspBridgeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

@@ -39,7 +39,15 @@ from apps.api.routers.gateway import GatewayCommandResponse
 
 
 def _jpeg_bytes(seed: int = 0) -> bytes:
-    return b"\xff\xd8\xff" + bytes([seed % 256] * 100)
+    """Gera JPEG real decodificável (S01.5: magic bytes sozinhos não bastam)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    img = Image.new("RGB", (64, 64), color=(seed % 256, 100, 150))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
 
 
 def _sha(data: bytes) -> str:
@@ -264,18 +272,34 @@ def test_gate2_command_via_testclient_mocked() -> None:
     async def _fake_uow():  # type: ignore[no-untyped-def]
         yield mock_uow
 
-    # ensure clean cursor state per session_id
+    # S02.8: comandos persistentes — mocka a camada de persistência.
     from apps.api.routers import gateway as gw_router
+
+    async def _fake_next(db: object, session: object, **kwargs: object) -> object:
+        return SimpleNamespace(
+            command="CAPTURE_FULL",
+            cursor=1,
+            payload={
+                "capture_id": "cap-001-full",
+                "frames": 3,
+                "gap_ms": 180,
+                "frame_size": "UXGA",
+                "jpeg_quality": 92,
+            },
+        )
 
     gw_router._command_cursors.clear()
     app.dependency_overrides[get_uow] = _fake_uow  # type: ignore[assignment]
     client = TestClient(app)
     try:
-        r = client.get(
-            "/api/v1/gateway/session/abc123hex123456/command",
-            params={"cursor": 0, "wait_ms": 25000, "phase": "CAPTURE"},
-            headers=_gateway_headers(),
-        )
+        with patch(
+            "src.pages_to_audio.capture.commands.next_persistent_command", side_effect=_fake_next
+        ):
+            r = client.get(
+                "/api/v1/gateway/session/abc123hex123456/command",
+                params={"cursor": 0, "wait_ms": 0, "phase": "CAPTURE"},
+                headers=_gateway_headers(),
+            )
         # session lookup is by public_id != abc123hex123456 so our mock returns fake_session
         # The endpoint validates binding via join; our mock bypasses SQL parsing and just returns
         # However the real query filters by public_id, so we need to ensure scalar returns fake

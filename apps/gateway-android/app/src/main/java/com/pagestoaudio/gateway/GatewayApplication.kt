@@ -93,7 +93,10 @@ class GatewayApplication : Application(), Configuration.Provider {
             .addInterceptor(GatewayAuthInterceptor(
                 deviceIdProvider = { config.deviceId },
                 deviceSecretProvider = { config.deviceSecret },
-                firmwareVersionProvider = { "gateway-android/${BuildConfig.VERSION_NAME}" }
+                firmwareVersionProvider = { "gateway-android/${BuildConfig.VERSION_NAME}" },
+                // S01.3: identidade cloud provisionada (X-Gateway-Id + Bearer).
+                gatewayIdProvider = { config.gatewayId ?: config.deviceId },
+                gatewaySecretProvider = { config.gatewaySecret ?: config.deviceSecret }
             ))
             .addInterceptor(logging)
             .connectTimeout(15, TimeUnit.SECONDS)

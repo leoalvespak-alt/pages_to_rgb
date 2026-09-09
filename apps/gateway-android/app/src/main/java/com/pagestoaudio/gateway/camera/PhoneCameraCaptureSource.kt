@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
@@ -58,6 +59,8 @@ class PhoneCameraCaptureSource(
     private var imageCapture: ImageCapture? = null
     private var preview: Preview? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    // S04.1: perfil vinculado atual — reutiliza binding durante a sessão.
+    private var boundProfile: Pair<Size?, Int>? = null
 
     // Cache de resoluções disponíveis — preenchido após bind
     private var cachedResolutions: List<Size> = emptyList()
@@ -72,6 +75,12 @@ class PhoneCameraCaptureSource(
         jpegQuality: Int = JPEG_QUALITY_FULL
     ): Result<Unit> = withContext(Dispatchers.Main) {
         try {
+            // S04.1: reutiliza binding quando o perfil não mudou (sem rebind por frame).
+            val profile = Pair(targetResolution, jpegQuality)
+            if (imageCapture != null && camera != null && boundProfile == profile) {
+                Log.d(TAG, "Camera binding reutilizado: $profile")
+                return@withContext Result.success(Unit)
+            }
             val provider = getCameraProvider()
             cameraProvider = provider
 
@@ -98,6 +107,7 @@ class PhoneCameraCaptureSource(
             )
             preview = previewUseCase
             imageCapture = imageCaptureUseCase
+            boundProfile = Pair(targetResolution, jpegQuality)
 
             // Popular resoluções disponíveis (quando possível, usa stream configs do provider)
             cachedResolutions = resolveAvailableResolutions(provider)
@@ -119,6 +129,7 @@ class PhoneCameraCaptureSource(
             camera = null
             imageCapture = null
             preview = null
+            boundProfile = null
         }
     }
 
@@ -152,12 +163,12 @@ class PhoneCameraCaptureSource(
             CaptureMode.FULL -> null // máxima disponível
         }
 
-        // Re-bind se qualidade/resolução mudou ou se ainda não vinculado
-        withContext(Dispatchers.Main) {
-            val needsRebind = imageCapture == null ||
-                (imageCapture?.let { it to quality } == null)
-            // Simplificado: sempre re-bind para garantir jpegQuality correto
-            bindCamera(targetResolution, quality).getOrThrow()
+        // S04.1: re-bind SOMENTE quando qualidade/resolução mudou ou sem vínculo.
+        val profile = Pair(targetResolution, quality)
+        if (imageCapture == null || boundProfile != profile) {
+            withContext(Dispatchers.Main) {
+                bindCamera(targetResolution, quality).getOrThrow()
+            }
         }
 
         val capture = imageCapture ?: throw IllegalStateException("ImageCapture not bound. Call bindCamera first.")
@@ -185,17 +196,16 @@ class PhoneCameraCaptureSource(
             val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
                 .setAutoCancelDuration(3, TimeUnit.SECONDS)
                 .build()
-            val result = control.startFocusAndMetering(action)
-            // Não bloquear indefinidamente — timeout cooperativo sem sleep arbitrário
-            withContext(Dispatchers.Main) {
-                try {
-                    // startFocusAndMetering retorna ListenableFuture; aguardar até AF_AE_TIMEOUT_MS
-                    // Usamos get com timeout via coroutines — se falhar, seguimos para captura (best-effort)
+            val future = control.startFocusAndMetering(action)
+            // S04.2: espera FORA da thread principal, cancelável, sem get() bloqueante no Main.
+            try {
+                withContext(Dispatchers.IO) {
                     @Suppress("DEPRECATION")
-                    result.get(AF_AE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                } catch (_: Exception) {
-                    Log.w(TAG, "AF/AE metering timeout or failed — proceeding to capture")
+                    future.get(AF_AE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 }
+            } catch (e: Exception) {
+                if (e is InterruptedException) Thread.currentThread().interrupt()
+                Log.w(TAG, "AF/AE metering timeout or failed — proceeding to capture")
             }
         } catch (e: Exception) {
             Log.w(TAG, "AF/AE not available: ${e.message}")
@@ -210,22 +220,27 @@ class PhoneCameraCaptureSource(
     ): CapturedFrame = suspendCancellableCoroutine { cont ->
         val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
 
-        // ImageCapture exige executor — usamos o fornecido (main)
+        // ImageCapture exige executor — callback chega no executor fornecido;
+        // S04.2: EXIF/hash/I-O saem para Dispatchers.IO com cancelamento observável.
         capture.takePicture(
             outputOptions,
             executor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    try {
-                        // 4. No onImageSaved: ler ExifInterface para orientação, corrigir se necessário,
-                        //    calcular SHA-256 via streaming, extrair width/height via inJustDecodeBounds
-                        val result = processSavedFile(file, captureId, frameIndex)
-                        if (cont.isActive) cont.resume(result)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "processSavedFile failed", e)
-                        // Limpeza: remover arquivo parcial em caso de falha controlada
-                        try { if (file.exists()) file.delete() } catch (_: Exception) {}
-                        if (cont.isActive) cont.resumeWithException(e)
+                    // Despacha processamento pesado para IO sem bloquear o callback.
+                    val job = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val result = processSavedFile(file, captureId, frameIndex)
+                            if (cont.isActive) cont.resume(result)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "processSavedFile failed", e)
+                            try { if (file.exists()) file.delete() } catch (_: Exception) {}
+                            if (cont.isActive) cont.resumeWithException(e)
+                        }
+                    }
+                    cont.invokeOnCancellation {
+                        job.cancel()
+                        Log.w(TAG, "capture processing cancelled for $captureId/$frameIndex")
                     }
                 }
 

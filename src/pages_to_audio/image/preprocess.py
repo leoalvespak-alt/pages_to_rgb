@@ -30,6 +30,8 @@ class PreprocessResult:
     output_path: Path
     success: bool
     error: str | None = None
+    # S05.11: applied | skipped (sem necessidade) | failed (com erro).
+    status: str = "applied"
 
 
 @dataclass
@@ -37,6 +39,8 @@ class PreprocessRequest:
     input_path: Path
     ops: list[PreprocessOp] = field(default_factory=list)
     output_dir: Path | None = None
+    # S05.11: nomes por sessão/frame (evita colisão {op}.jpg entre sessões).
+    session_tag: str = "default"
 
     def __post_init__(self) -> None:
         if not self.ops:
@@ -180,7 +184,12 @@ def preprocess_image(request: PreprocessRequest) -> list[PreprocessResult]:
     Apply requested preprocessing operations synchronously.
     Each op writes a separate output file (ORIGINAL untouched, §18.1/Invariant 8).
     Must be run in executor — never call from event loop directly.
+
+    S05.11: nomes por sessão/frame ({session_tag}_{op}.jpg); status
+    applied/skipped/failed refletido no artefato (sem sucesso mascarado).
     """
+    import hashlib
+
     output_dir = request.output_dir or request.input_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -189,14 +198,27 @@ def preprocess_image(request: PreprocessRequest) -> list[PreprocessResult]:
 
     for op in request.ops:
         func = _OP_FUNCS[op]
-        out_path = output_dir / f"{op.value}.jpg"
+        out_path = output_dir / f"{request.session_tag}_{op.value}.jpg"
         try:
             processed = func(img)
+            raw_before = img.tobytes() if hasattr(img, "tobytes") else b""
+            raw_after = processed.tobytes() if hasattr(processed, "tobytes") else b""
+            transformed = (
+                bool(raw_before)
+                and bool(raw_after)
+                and (hashlib.sha256(raw_before).digest() != hashlib.sha256(raw_after).digest())
+            )
             _save_image(processed, out_path)
-            results.append(PreprocessResult(op=op, output_path=out_path, success=True))
+            # A30: exceção ampla nunca vira sucesso; sem transformação = skipped.
+            status = "applied" if transformed else "skipped"
+            results.append(
+                PreprocessResult(op=op, output_path=out_path, success=True, status=status)
+            )
         except Exception as exc:
             results.append(
-                PreprocessResult(op=op, output_path=out_path, success=False, error=str(exc))
+                PreprocessResult(
+                    op=op, output_path=out_path, success=False, error=str(exc), status="failed"
+                )
             )
 
     return results

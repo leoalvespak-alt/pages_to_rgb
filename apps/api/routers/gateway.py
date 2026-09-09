@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -13,6 +13,10 @@ from apps.api.dependencies import SettingsDep, UowDep
 from src.pages_to_audio.admin.settings_service import get_effective_admin_settings, rgb_for_answer
 from src.pages_to_audio.auth.gateway import verify_gateway_token
 from src.pages_to_audio.capture.policy import CapturePolicy, build_capture_policy
+from src.pages_to_audio.common.contract_ids import (
+    ESP_ID_PATTERN,
+    MAX_EXACT_CURSOR,
+)
 from src.pages_to_audio.common.errors import AppError, FrameConflictError, InvalidStateTransition
 from src.pages_to_audio.common.ids import new_public_id
 from src.pages_to_audio.db.models.capture import Capture
@@ -26,6 +30,17 @@ from src.pages_to_audio.domain.state_machine import transition_session
 from src.pages_to_audio.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+async def _result_cursor_for(uow: UowDep, session: Session) -> int:
+    """Cursor de resultado autoritativo (contrato §3.7); 0 sem delivery."""
+    from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
+
+    delivery = await uow.session.scalar(
+        select(SessionResultDelivery).where(SessionResultDelivery.session_id == session.id)
+    )
+    return int(delivery.cursor) if delivery is not None else 0
+
 
 router = APIRouter(
     prefix="/gateway",
@@ -108,14 +123,17 @@ async def hello(body: HelloRequest, gateway_id: GatewayIdDep, uow: UowDep) -> He
 
 
 class SessionStartRequest(BaseModel):
-    expected_pages: int | None = None
-    expected_questions: int | None = None
-    minimum_ratio: float | None = None
+    expected_pages: int | None = Field(default=None, ge=1, le=100)
+    expected_questions: int | None = Field(default=None, ge=1, le=1000)
+    minimum_ratio: float | None = Field(default=None, gt=0, le=1)
     gateway_code: str = Field(default="", max_length=128)
-    device_code: str = Field(default="CAM-001", min_length=1, max_length=128)
+    device_code: str = Field(default="CAM-001", min_length=1, max_length=63, pattern=ESP_ID_PATTERN)
     capture_source: str = Field(default="ANDROID_CAMERA", pattern="^(ANDROID_CAMERA|ESP32_CAMERA)$")
     allow_new_session: bool = True
-    resume_hint: str | None = Field(default=None, max_length=128)
+    resume_hint: str | None = Field(default=None, max_length=63, pattern=ESP_ID_PATTERN)
+    # Tradução contrato §3.7 (local start): resume_hint booleano + last_session_id.
+    resume_requested: bool = False
+    last_session_id: str | None = Field(default=None, max_length=63, pattern=ESP_ID_PATTERN)
 
 
 class SessionStartResponse(BaseModel):
@@ -124,6 +142,8 @@ class SessionStartResponse(BaseModel):
     expected_pages: int
     expected_questions: int
     minimum_ratio: float
+    resumed: bool = False
+    cursor: int = Field(default=0, ge=0, le=MAX_EXACT_CURSOR)
 
 
 @router.post("/session/start", response_model=SessionStartResponse)
@@ -176,34 +196,46 @@ async def session_start(
     )
     mr = body.minimum_ratio if body.minimum_ratio is not None else admin_settings.minimum_ratio
 
-    # Handle allow_new_session=false → only resume existing CAPTURING session
+    # Handle allow_new_session=false → only resume existing CAPTURING session.
+    # Contrato §3.7-3.8: hint exato nunca cai silenciosamente em outra sessão;
+    # sessão encerrada retorna 409 com resolução explícita.
+    # Tradução local→cloud: resume_requested+last_session_id equivalem a resume_hint.
+    effective_hint = body.resume_hint or (body.last_session_id if body.resume_requested else None)
     if not body.allow_new_session:
         resume_session: Session | None = None
-        if body.resume_hint:
-            resume_session = await uow.session.scalar(
+        if effective_hint:
+            hint_session = await uow.session.scalar(
                 select(Session)
                 .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
                 .where(
-                    Session.public_id == body.resume_hint,
+                    Session.public_id == effective_hint,
                     AndroidGateway.gateway_code == gateway_id,
                     Session.device_id == device.id,
                 )
             )
-            is_capturing = (
-                resume_session is not None
-                and SessionState(resume_session.status) == SessionState.CAPTURING
-            )
-            if is_capturing:
-                gateway.last_seen_at = datetime.now(UTC)
-                device.last_seen_at = datetime.now(UTC)
-                return SessionStartResponse(
-                    session_id=resume_session.public_id,
-                    status=resume_session.status,
-                    expected_pages=resume_session.expected_pages,
-                    expected_questions=resume_session.expected_questions,
-                    minimum_ratio=float(resume_session.minimum_ratio),
+            if hint_session is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Resume hint does not match an exact gateway/device session",
                 )
-        # Try latest CAPTURING without hint
+            if SessionState(hint_session.status) != SessionState.CAPTURING:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Hinted session is {hint_session.status}; no silent fallback",
+                )
+            resume_session = hint_session
+            gateway.last_seen_at = datetime.now(UTC)
+            device.last_seen_at = datetime.now(UTC)
+            return SessionStartResponse(
+                session_id=resume_session.public_id,
+                status=resume_session.status,
+                expected_pages=resume_session.expected_pages,
+                expected_questions=resume_session.expected_questions,
+                minimum_ratio=float(resume_session.minimum_ratio),
+                resumed=True,
+                cursor=await _result_cursor_for(uow, resume_session),
+            )
+        # Sem hint: retoma a CAPTURING mais recente do mesmo vínculo (autoritativo).
         resume_session = await uow.session.scalar(
             select(Session)
             .where(
@@ -222,14 +254,49 @@ async def session_start(
                 expected_pages=resume_session.expected_pages,
                 expected_questions=resume_session.expected_questions,
                 minimum_ratio=float(resume_session.minimum_ratio),
+                resumed=True,
+                cursor=await _result_cursor_for(uow, resume_session),
             )
         raise HTTPException(
             status_code=409,
             detail="No resumable session and allow_new_session=false",
         )
 
+    # allow_new_session=true com hint explícito: retoma se CAPTURING, senão 409
+    # explícito quando hint aponta sessão encerrada/inexistente (sem criar outra
+    # sessão silenciosamente no lugar da indicada).
+    if effective_hint:
+        hinted = await uow.session.scalar(
+            select(Session)
+            .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
+            .where(
+                Session.public_id == effective_hint,
+                AndroidGateway.gateway_code == gateway_id,
+                Session.device_id == device.id,
+            )
+        )
+        if hinted is not None:
+            if SessionState(hinted.status) == SessionState.CAPTURING:
+                gateway.last_seen_at = datetime.now(UTC)
+                device.last_seen_at = datetime.now(UTC)
+                return SessionStartResponse(
+                    session_id=hinted.public_id,
+                    status=hinted.status,
+                    expected_pages=hinted.expected_pages,
+                    expected_questions=hinted.expected_questions,
+                    minimum_ratio=float(hinted.minimum_ratio),
+                    resumed=True,
+                    cursor=await _result_cursor_for(uow, hinted),
+                )
+            raise HTTPException(
+                status_code=409,
+                detail=f"Hinted session is {hinted.status}; not resumable",
+            )
+
     session_id = new_public_id()
     now = datetime.now(UTC)
+    # S07/contrato §2: novas sessões recebem explicitamente o perfil low-power
+    # (12%/150ms/2850ms). Revisões antigas e seus hashes permanecem imutáveis.
     session = Session(
         public_id=session_id,
         device_id=device.id,
@@ -246,6 +313,10 @@ async def session_start(
             "expected_pages": ep,
             "expected_questions": eq,
             "minimum_ratio": mr,
+            "rgb_profile": "low-power",
+            "brightness_percent": 12,
+            "on_ms": 150,
+            "off_ms": 2850,
         },
         provider_snapshot={
             "settings_version": admin_settings.version,
@@ -270,6 +341,8 @@ async def session_start(
         expected_pages=ep,
         expected_questions=eq,
         minimum_ratio=mr,
+        resumed=False,
+        cursor=0,
     )
 
 
@@ -327,10 +400,13 @@ class GatewayCommandResponse(BaseModel):
     Campos obrigatórios para CAPTURE_*: capture_id, frames, gap_ms. Para PING/STOP/PAUSE/RESUME
     apenas command/cursor/session_id. frame_size/jpeg_quality são opcionais (ex: UXGA/8
     para ESP32, 1280x720/75 para PROBE Android).
+
+    Contrato §3.9: comando desconhecido ou campo obrigatório inválido nunca consome
+    cursor — por isso `command` é Literal fechado (422 em valor desconhecido).
     """
 
-    command: str  # CAPTURE_PROBE | CAPTURE_FULL | PAUSE | RESUME | PING | STOP
-    cursor: int
+    command: Literal["CAPTURE_PROBE", "CAPTURE_FULL", "PAUSE", "RESUME", "PING", "STOP"]
+    cursor: int = Field(ge=0, le=MAX_EXACT_CURSOR)
     session_id: str
     capture_id: str | None = None
     frames: int | None = None
@@ -344,23 +420,20 @@ async def get_command(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    cursor: int = Query(default=0, ge=0),
+    cursor: int = Query(default=0, ge=0, le=MAX_EXACT_CURSOR),
     wait_ms: int = Query(default=0, ge=0, le=25000),
     phase: str | None = Query(default=None),
 ) -> GatewayCommandResponse:
-    """Long polling simplificado — cursor monotônico, wait_ms até 25000 (validado).
+    """S02.8: comandos persistentes, GET sem efeito colateral, long-poll limitado.
 
-    Stub Etapa 5: retorna imediatamente (sem sleep cooperativo). wait_ms é aceito para
-    compatibilidade com firmware/ Android ViewModel que envia waitMs=25000 e phase=CAPTURE.
-    Cursor é in-memory (_command_cursors); ver TODO acima. Comandos possíveis:
-    CAPTURE_PROBE, CAPTURE_FULL, PAUSE, RESUME, PING, STOP (cf. ANDROID_GATEWAY_CONTRACT).
-
-    Para PING/STOP/PAUSE/RESUME apenas command/cursor/session_id; para CAPTURE_* inclui
-    capture_id/frames/gap_ms (e opcional frame_size/jpeg_quality).
-    Diferente de GET /result (que retorna 204 quando cursor >= delivery.cursor), este
-    endpoint sempre retorna 200 com cursor+1 para manter compatibilidade com
-    SessionViewModel/fetchCommand que espera CommandResponse não-nulo.
+    Cursor monotônico persistido em gateway_commands; repetição do mesmo cursor
+    retorna o mesmo comando. wait_ms (teto 25s) aguarda de forma cooperativa por
+    comando de controle; nunca alterna PAUSE/PROBE/PING por contador demo.
+    Para PING/STOP/PAUSE/RESUME apenas command/cursor/session_id; CAPTURE_*
+    inclui capture_id/frames/gap_ms.
     """
+    from src.pages_to_audio.capture.commands import next_persistent_command
+
     session = await uow.session.scalar(
         select(Session)
         .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
@@ -375,89 +448,55 @@ async def get_command(
     if device is None or not device.enabled:
         raise HTTPException(status_code=403, detail="Device disabled")
 
-    # Simple monotonic cursor: increment per call, persistent per session.
-    # Respeita cursor do cliente (se cliente já avançou, não regride).
-    last = _command_cursors.get(session_id, cursor)
-    next_cursor = max(last + 1, cursor + 1)
-    # If client is ahead, respect it
-    if cursor >= last:
-        next_cursor = cursor + 1
-    _command_cursors[session_id] = next_cursor
-
-    # Determine command based on session state + phase hint.
     try:
-        state = SessionState(session.status)
-    except ValueError:
-        state = SessionState.CAPTURING
-
-    if state in {SessionState.LOCKED, SessionState.CAPTURE_LOCKING}:
-        return GatewayCommandResponse(command="STOP", cursor=next_cursor, session_id=session_id)
-    if state.is_terminal:
-        return GatewayCommandResponse(command="STOP", cursor=next_cursor, session_id=session_id)
-    if state == SessionState.CAPTURING:
-        # Phase explícita tem prioridade (permite servidor forçar PAUSE/RESUME/PROBE).
-        norm_phase = (phase or "").strip().upper()
-        if norm_phase == "PAUSE":
-            return GatewayCommandResponse(
-                command="PAUSE", cursor=next_cursor, session_id=session_id
-            )
-        if norm_phase == "RESUME":
-            return GatewayCommandResponse(
-                command="RESUME", cursor=next_cursor, session_id=session_id
-            )
-        if norm_phase == "PROBE":
-            cid = f"cap-{next_cursor:03d}-probe"
-            return GatewayCommandResponse(
-                command="CAPTURE_PROBE",
-                cursor=next_cursor,
-                session_id=session_id,
-                capture_id=cid,
-                frames=1,
-                gap_ms=180,
-                frame_size="1280x720",
-                jpeg_quality=75,
-            )
-        # Rotação determinística para demo/E2E sem policy dinâmica:
-        # - a cada 5 → CAPTURE_PROBE (1 frame, 180ms, 72p quality 75)
-        # - a cada 7 → PAUSE (raro, demonstra PAUSE/RESUME sem quebrar fluxo CAPTURE)
-        # - a cada 4 → PING (heartbeat)
-        # - senão → CAPTURE_FULL (3 frames, 180ms)
-        if next_cursor % 7 == 0:
-            return GatewayCommandResponse(
-                command="PAUSE", cursor=next_cursor, session_id=session_id
-            )
-        if next_cursor % 7 == 1:
-            # Imediatamente após PAUSE, envia RESUME para retomar preview
-            return GatewayCommandResponse(
-                command="RESUME", cursor=next_cursor, session_id=session_id
-            )
-        if next_cursor % 5 == 0:
-            cid = f"cap-{next_cursor:03d}-probe"
-            return GatewayCommandResponse(
-                command="CAPTURE_PROBE",
-                cursor=next_cursor,
-                session_id=session_id,
-                capture_id=cid,
-                frames=1,
-                gap_ms=180,
-                frame_size="1280x720",
-                jpeg_quality=75,
-            )
-        if next_cursor % 4 == 0:
-            return GatewayCommandResponse(command="PING", cursor=next_cursor, session_id=session_id)
-        cid = f"cap-{next_cursor:03d}-full"
-        return GatewayCommandResponse(
-            command="CAPTURE_FULL",
-            cursor=next_cursor,
-            session_id=session_id,
-            capture_id=cid,
-            frames=3,
-            gap_ms=180,
-            frame_size="UXGA",
-            jpeg_quality=92,
+        row = await next_persistent_command(
+            uow.session, session, client_cursor=cursor, phase=phase, wait_ms=wait_ms
         )
-    # Para estados intermediários (ex: IMAGE_PROCESSING mas não terminal nem CAPTURING)
-    return GatewayCommandResponse(command="PING", cursor=next_cursor, session_id=session_id)
+        await uow.session.flush()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = row.payload or {}
+    return GatewayCommandResponse(
+        command=row.command,  # type: ignore[arg-type]
+        cursor=int(row.cursor),
+        session_id=session_id,
+        capture_id=payload.get("capture_id"),
+        frames=payload.get("frames"),
+        gap_ms=payload.get("gap_ms"),
+        frame_size=payload.get("frame_size"),
+        jpeg_quality=payload.get("jpeg_quality"),
+    )
+
+
+class CommandAckRequest(BaseModel):
+    cursor: int = Field(ge=0, le=MAX_EXACT_CURSOR)
+
+
+@router.post("/session/{session_id}/command/ack")
+async def ack_command_endpoint(
+    session_id: str,
+    body: CommandAckRequest,
+    gateway_id: GatewayIdDep,
+    uow: UowDep,
+) -> dict[str, Any]:
+    """S02.8/contrato §5.7: confirma efeito durável; repetir GET não altera estado."""
+    from src.pages_to_audio.capture.commands import ack_command
+
+    session = await uow.session.scalar(
+        select(Session)
+        .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
+        .where(
+            Session.public_id == session_id,
+            AndroidGateway.gateway_code == gateway_id,
+        )
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    row = await ack_command(uow.session, session, cursor=body.cursor)
+    await uow.session.flush()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Command not found for cursor")
+    return {"session_id": session_id, "cursor": int(row.cursor), "acked": True}
 
 
 @router.post("/session/{session_id}/end-signal")
@@ -561,19 +600,33 @@ async def end_signal(
     except Exception as exc:
         logger.warning("mark_result_processing_failed", error=str(exc), session_id=session_id)
 
-    # Tentativa best-effort de iniciar ProcessExamWorkflow via Temporal.
-    # Se TEMPORAL_ADDRESS vazio ou Temporal offline, apenas loga; painel ainda
-    # pode publicar RGB manualmente via simulate_android / admin publish.
+    # S02.9/A04: congela intenção de processamento na MESMA transação do LOCK
+    # (outbox). Dispatcher envia após commit com ID determinístico; falha do
+    # Temporal deixa evento PENDING observável (nunca "locked:true" sem intent).
+    try:
+        from src.pages_to_audio.capture.dispatcher import enqueue_workflow_intent
+
+        await enqueue_workflow_intent(
+            uow.session, session_db_id=session.id, session_public_id=session.public_id
+        )
+        await uow.session.flush()
+    except Exception as exc:
+        logger.warning("workflow_outbox_enqueue_failed", error=str(exc), session_id=session_id)
+        raise HTTPException(status_code=500, detail="Failed to persist processing intent") from exc
+
+    # Tentativa best-effort de despacho imediato (após intent durável).
     try:
         temporal_addr = getattr(settings, "TEMPORAL_ADDRESS", "")
         if temporal_addr:
-            from src.pages_to_audio.workflows.starter import TemporalWorkflowStarter
+            from src.pages_to_audio.capture.dispatcher import dispatch_pending
 
-            starter = TemporalWorkflowStarter()
-            await starter.start_process_exam(session.public_id)
-            logger.info("workflow_start_after_lock", session_id=session_id)
+            await dispatch_pending(uow.session)
+            await uow.session.flush()
+        else:
+            logger.info("workflow_dispatch_skipped_no_temporal", session_id=session_id)
     except Exception as exc:
-        logger.warning("workflow_start_after_lock_failed", error=str(exc), session_id=session_id)
+        # Intent permanece PENDING para retry observável pelo dispatcher.
+        logger.warning("workflow_dispatch_failed_pending", error=str(exc), session_id=session_id)
 
     logger.info("end_signal", session_id=session_id, status=session.status)
     return {"session_id": session_id, "status": session.status, "locked": True}
@@ -787,9 +840,9 @@ async def debug_publish_rgb(
 
 
 class CaptureRequest(BaseModel):
-    capture_id: str = Field(min_length=1, max_length=128)
+    capture_id: str = Field(min_length=1, max_length=63, pattern=ESP_ID_PATTERN)
     mode: str = "full"
-    command_cursor: int = 0
+    command_cursor: int = Field(default=0, ge=0, le=MAX_EXACT_CURSOR)
     requested_frames: int = Field(default=3, ge=0, le=100)
 
 
@@ -872,6 +925,23 @@ def _parse_resolution(value: str | None) -> tuple[int | None, int | None]:
     return None, None
 
 
+async def _read_frame_body_limited(
+    file: UploadFile, *, limit_bytes: int = 12 * 1024 * 1024
+) -> bytes:
+    """Lê corpo em chunks aplicando limite antes de carga integral (S01.5/A19)."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit_bytes:
+            raise HTTPException(status_code=413, detail="Frame body exceeds size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("/session/{session_id}/frame")
 async def upload_frame_gateway(
     session_id: str,
@@ -879,14 +949,20 @@ async def upload_frame_gateway(
     gateway_id: GatewayIdDep,
     uow: UowDep,
     _settings: SettingsDep,
-    x_frame_index: int = Header(..., alias="X-Frame-Index"),
-    x_capture_id: str = Header(..., alias="X-Capture-Id"),
-    x_sha256: str = Header(..., alias="X-SHA256"),
+    x_frame_index: int = Header(..., alias="X-Frame-Index", ge=0, le=10000),
+    x_capture_id: str = Header(
+        ..., alias="X-Capture-Id", min_length=1, max_length=63, pattern=ESP_ID_PATTERN
+    ),
+    x_sha256: str = Header(
+        ..., alias="X-SHA256", min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    ),
     x_received_at: str | None = Header(None, alias="X-Received-Android-At"),
     x_resolution: str | None = Header(None, alias="X-Resolution"),
     x_orientation: int | None = Header(None, alias="X-Orientation"),
 ) -> dict[str, Any]:
     """Receive a JPEG frame from the Android gateway."""
+    # Limite de corpo aplicado antes de carregar integralmente (S01.5): FastAPI já
+    # bufferiza, mas rejeitamos Content-Length declarado > 12MB antes de ler.
     # Validate binding
     session = await uow.session.scalar(
         select(Session)
@@ -902,7 +978,7 @@ async def upload_frame_gateway(
     if device is None or not device.enabled:
         raise HTTPException(status_code=403, detail="Device disabled")
 
-    data = await file.read()
+    data = await _read_frame_body_limited(file)
 
     from src.pages_to_audio.capture.frame_upload import FrameUploadRequest
     from src.pages_to_audio.capture.frame_upload import upload_frame as _upload
@@ -949,9 +1025,19 @@ async def capture_complete(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    capture_id: str = Query(..., min_length=1, max_length=128),
-    received_frames: int = Query(..., ge=0),
+    capture_id: str = Query(..., min_length=1, max_length=63, pattern=ESP_ID_PATTERN),
+    received_frames: int = Query(..., ge=0, le=10000),
 ) -> dict[str, Any]:
+    """Fecha burst. S02.6/A12: contagem autoritativa = frames únicos no banco.
+
+    O número declarado pelo cliente é registrado como `declared_frames` para
+    auditoria, mas nunca sobrescreve a contagem. Divergência gera evento de
+    atenção sem inflar contagem.
+    """
+    from sqlalchemy import func
+
+    from src.pages_to_audio.db.models.frame import Frame
+
     session = await uow.session.scalar(
         select(Session)
         .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
@@ -973,19 +1059,34 @@ async def capture_complete(
     )
     if cap is None:
         raise HTTPException(status_code=404, detail="Capture not found")
-    cap.received_frames = received_frames
+    confirmed = (
+        await uow.session.scalar(
+            select(func.count()).select_from(Frame).where(Frame.capture_id == cap.id)
+        )
+        or 0
+    )
+    cap.received_frames = int(confirmed)
     cap.status = "complete"
     cap.completed_at = datetime.now(UTC)
     await uow.session.flush()
+    if int(received_frames) != int(confirmed):
+        logger.warning(
+            "capture_complete_count_mismatch",
+            session_id=session_id,
+            capture_id=capture_id,
+            declared=int(received_frames),
+            confirmed=int(confirmed),
+        )
     logger.info(
         "capture_complete",
         session_id=session_id,
         capture_id=capture_id,
-        received=received_frames,
+        received=int(confirmed),
     )
     return {
         "session_id": session_id,
         "capture_id": capture_id,
         "received_frames": cap.received_frames,
+        "declared_frames": int(received_frames),
         "status": cap.status,
     }

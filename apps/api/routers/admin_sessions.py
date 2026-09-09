@@ -38,11 +38,14 @@ from src.pages_to_audio.db.models.session_result_delivery import SessionResultDe
 from src.pages_to_audio.domain.enums.roles import ActorType
 from src.pages_to_audio.domain.enums.session_state import SessionState
 from src.pages_to_audio.domain.state_machine import ALLOWED_TRANSITIONS, transition_session
+from src.pages_to_audio.observability.logging import get_logger
 from src.pages_to_audio.rgb.delivery import SessionBinding, get_or_create_delivery
 from src.pages_to_audio.rgb.schemas import RgbResultCommand
 from src.pages_to_audio.storage import get_storage_adapter
 
 router = APIRouter(prefix="/admin/sessions", tags=["admin-sessions"])
+
+logger = get_logger(__name__)
 
 
 @router.get("", response_model=AdminSessionListResponse)
@@ -147,7 +150,14 @@ async def _session_binding(
 
 @router.get("/{public_id}", response_model=AdminSessionDetail)
 async def session_detail(
-    public_id: str, _claims: AdminClaimsDep, uow: UowDep, response: Response
+    public_id: str,
+    _claims: AdminClaimsDep,
+    uow: UowDep,
+    response: Response,
+    frames_page: int = Query(default=1, ge=1),
+    frames_limit: int = Query(default=50, ge=1, le=200),
+    logs_page: int = Query(default=1, ge=1),
+    logs_limit: int = Query(default=100, ge=1, le=500),
 ) -> AdminSessionDetail:
     session, device, gateway = await _session_binding(uow, public_id)
     captures = (
@@ -155,9 +165,20 @@ async def session_detail(
             select(Capture).where(Capture.session_id == session.id).order_by(Capture.created_at)
         )
     ).all()
+    # S08.4: paginar frames/eventos; nunca carregar histórico inteiro repetidamente.
+    frames_total = (
+        await uow.session.scalar(
+            select(func.count()).select_from(Frame).where(Frame.session_id == session.id)
+        )
+        or 0
+    )
     frames = (
         await uow.session.scalars(
-            select(Frame).where(Frame.session_id == session.id).order_by(Frame.created_at)
+            select(Frame)
+            .where(Frame.session_id == session.id)
+            .order_by(Frame.created_at)
+            .offset((frames_page - 1) * frames_limit)
+            .limit(frames_limit)
         )
     ).all()
     answer_rows = (
@@ -174,12 +195,19 @@ async def session_detail(
     sequence = None
     if delivery is not None and delivery.active_sequence_id is not None:
         sequence = await uow.session.get(RgbSequence, delivery.active_sequence_id)
+    logs_total = (
+        await uow.session.scalar(
+            select(func.count()).select_from(AuditEvent).where(AuditEvent.session_id == session.id)
+        )
+        or 0
+    )
     logs = (
         await uow.session.scalars(
             select(AuditEvent)
             .where(AuditEvent.session_id == session.id)
             .order_by(AuditEvent.created_at.desc())
-            .limit(500)
+            .offset((logs_page - 1) * logs_limit)
+            .limit(logs_limit)
         )
     ).all()
     response.headers["Cache-Control"] = "no-store"
@@ -222,6 +250,8 @@ async def session_detail(
             )
             for item in frames
         ],
+        frames_total=int(frames_total),
+        frames_page=frames_page,
         answers=[
             AdminAnswerItem(
                 question_number=question.question_number,
@@ -271,6 +301,8 @@ async def session_detail(
             )
             for item in logs
         ],
+        logs_total=int(logs_total),
+        logs_page=logs_page,
     )
 
 
@@ -324,6 +356,14 @@ async def cancel_session(
         reason_code="ADMIN_CANCELLED",
     )
     await uow.session.flush()
+    # S02.10/A18: solicita cancelamento do workflow (best-effort; cerca durável
+    # no banco impede publicação/avanço tardio mesmo se o Temporal falhar aqui).
+    try:
+        from src.pages_to_audio.workflows.cancellation import request_workflow_cancellation
+
+        await request_workflow_cancellation(public_id)
+    except Exception as exc:
+        logger.warning("workflow_cancel_request_failed", error=str(exc)[:200])
     return AdminActionResponse(session_id=public_id, status=session.status)
 
 
@@ -388,9 +428,7 @@ async def retry_session(
     await uow.session.flush()
     from src.pages_to_audio.workflows.starter import TemporalWorkflowStarter
 
-    await TemporalWorkflowStarter().start_process_exam(
-        public_id, operation_suffix=operation_suffix
-    )
+    await TemporalWorkflowStarter().start_process_exam(public_id, operation_suffix=operation_suffix)
     return AdminActionResponse(
         session_id=public_id,
         status=session.status,

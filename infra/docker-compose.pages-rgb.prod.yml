@@ -1,26 +1,30 @@
-﻿services:
+﻿name: pages-rgb
+
+services:
   pages-rgb-app:
-    image: ghcr.io/leoalvespak-alt/pages_to_rgb:${IMAGE_TAG:-latest}
+    image: ghcr.io/leoalvespak-alt/pages_to_rgb:${IMAGE_TAG:?IMAGE_TAG é obrigatório (SHA imutável, nunca latest em produção)}
     container_name: pages-rgb-app
     restart: unless-stopped
     env_file:
       - /srv/pages-to-rgb/config/.env.pages-rgb
     environment:
       APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL é obrigatório}
       STORAGE_PROVIDER: r2
-      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
-      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
-      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
-      R2_ENDPOINT: ${R2_ENDPOINT}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?R2_ACCOUNT_ID é obrigatório}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID é obrigatório}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY é obrigatório}
+      R2_ENDPOINT: ${R2_ENDPOINT:?R2_ENDPOINT é obrigatório}
       R2_BUCKET_ORIGINALS: ${R2_BUCKET_ORIGINALS:-pages-to-rgb-originals}
       R2_BUCKET_DERIVED: ${R2_BUCKET_DERIVED:-pages-to-rgb-derived}
       R2_BUCKET_OCR_RAW: ${R2_BUCKET_OCR_RAW:-pages-to-rgb-ocr}
       R2_BUCKET_AUDIO: ${R2_BUCKET_AUDIO:-pages-to-rgb-audio}
-      ANDROID_GATEWAY_TOKEN: ${ANDROID_GATEWAY_TOKEN}
+      ANDROID_GATEWAY_TOKEN: ${ANDROID_GATEWAY_TOKEN:?ANDROID_GATEWAY_TOKEN é obrigatório}
       ANDROID_GATEWAY_TOKEN_PREVIOUS: ${ANDROID_GATEWAY_TOKEN_PREVIOUS:-}
-      DEVICE_HMAC_MASTER_KEY: ${DEVICE_HMAC_MASTER_KEY}
-      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-}
+      DEVICE_HMAC_MASTER_KEY: ${DEVICE_HMAC_MASTER_KEY:?DEVICE_HMAC_MASTER_KEY é obrigatório}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:?TEMPORAL_ADDRESS é obrigatório}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-pages-to-audio}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-pages-to-audio-main}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -34,8 +38,33 @@
       retries: 3
       start_period: 15s
 
+  # S05.4/S11.3: worker separado, mesma imagem/versão, fila explícita.
+  pages-rgb-worker:
+    image: ghcr.io/leoalvespak-alt/pages_to_rgb:${IMAGE_TAG:?IMAGE_TAG é obrigatório (SHA imutável, nunca latest em produção)}
+    container_name: pages-rgb-worker
+    restart: unless-stopped
+    command: ["python", "-m", "src.pages_to_audio.workflows.worker"]
+    env_file:
+      - /srv/pages-to-rgb/config/.env.pages-rgb
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL é obrigatório}
+      STORAGE_PROVIDER: r2
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?R2_ACCOUNT_ID é obrigatório}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID é obrigatório}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY é obrigatório}
+      R2_ENDPOINT: ${R2_ENDPOINT:?R2_ENDPOINT é obrigatório}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:?TEMPORAL_ADDRESS é obrigatório}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-pages-to-audio}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-pages-to-audio-main}
+    networks:
+      - pages_rgb_net
+    depends_on:
+      pages-rgb-app:
+        condition: service_healthy
+
   admin:
-    image: ghcr.io/leoalvespak-alt/pages_to_rgb-admin:${IMAGE_TAG:-latest}
+    image: ghcr.io/leoalvespak-alt/pages_to_rgb-admin:${IMAGE_TAG:?IMAGE_TAG é obrigatório (SHA imutável, nunca latest em produção)}
     restart: unless-stopped
     environment:
       API_URL: http://pages-rgb-app:8000
@@ -75,4 +104,3 @@ volumes:
     name: pages_rgb_caddy_data
   pages_rgb_caddy_config:
     name: pages_rgb_caddy_config
-

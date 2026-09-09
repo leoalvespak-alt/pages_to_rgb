@@ -140,6 +140,14 @@ class AdminSettingsUpdate(BaseModel):
 class ProviderTestRequest(BaseModel):
     provider: ProviderName
     model: ModelName
+    # S06.6: verificação usa a configuração PROPOSTA no formulário (quando
+    # enviada), nunca a credencial antiga salva — salvo apenas como fallback
+    # quando o campo proposto é omitido.
+    api_key: str | None = Field(default=None, max_length=8192)
+    google_document_ai_project_id: str | None = Field(default=None, max_length=256)
+    google_document_ai_location: str | None = Field(default=None, max_length=32)
+    google_document_ai_processor_id: str | None = Field(default=None, max_length=256)
+    google_document_ai_credentials: str | None = Field(default=None, max_length=32768)
 
 
 class ProviderTestResponse(BaseModel):
@@ -276,10 +284,14 @@ class AdminSessionDetail(BaseModel):
     gateway_code: str | None
     captures: list[AdminCaptureItem]
     frames: list[AdminFrameItem]
+    frames_total: int = 0
+    frames_page: int = 1
     answers: list[AdminAnswerItem]
     rgb_sequence: AdminRgbSequenceItem | None
     delivery: dict[str, Any] | None
     logs: list[AdminAuditItem]
+    logs_total: int = 0
+    logs_page: int = 1
 
 
 class SignedFrameUrlResponse(BaseModel):

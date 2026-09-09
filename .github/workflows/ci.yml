@@ -27,7 +27,7 @@ jobs:
           key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml') }}
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --all-groups
 
       - name: Lint
         run: uv run ruff check src/ apps/
@@ -42,7 +42,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    if: false  # enabled in Phase 1 with Postgres service
+    # S09.1: integração ATIVA com Postgres+pgvector (falha impede promoção).
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -59,6 +59,18 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --all-extras --all-groups
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/pages_to_audio_test
       - name: Integration tests
         run: uv run pytest tests/integration/ -m integration -v
         env:
@@ -69,8 +81,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -f infra/docker/api.Dockerfile -t pages-to-audio-api:ci .
+      - name: Build production image (efetiva, não outro Dockerfile)
+        run: docker build -f infra/docker/Dockerfile.pages-rgb -t pages-to-audio-api:ci .
+      - name: Verify imports and executables in final image
+        run: |
+          docker run --rm pages-to-audio-api:ci python -c "import google.auth, PIL.Image; print('imports ok')"
+          docker run --rm --entrypoint ffmpeg pages-to-audio-api:ci -version | head -1
+          docker run --rm --entrypoint ffprobe pages-to-audio-api:ci -version | head -1
 
   admin:
     runs-on: ubuntu-latest
@@ -84,6 +101,8 @@ jobs:
       - run: npm ci
         working-directory: apps/admin
       - run: npm run typecheck
+        working-directory: apps/admin
+      - run: npm test
         working-directory: apps/admin
       - run: npm run build
         working-directory: apps/admin

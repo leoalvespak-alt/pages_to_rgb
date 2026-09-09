@@ -79,12 +79,13 @@ class CommandPollWorker(
                 return Result.retry()
             }
 
-            cursor = cmd.cursor
-            Log.i(TAG, "Comando recebido: ${cmd.command} cursor=$cursor captureId=${cmd.captureId} frames=${cmd.frames} gapMs=${cmd.gapMs}")
+            // S04.5: cursor avança SOMENTE após efeito; desconhecido nunca consome.
+            Log.i(TAG, "Comando recebido: ${cmd.command} cursor=${cmd.cursor} captureId=${cmd.captureId} frames=${cmd.frames} gapMs=${cmd.gapMs}")
 
+            var effectOk = true
             when (cmd.command) {
-                "CAPTURE_PROBE" -> handleCapture(cmd, CaptureMode.PROBE, sessionId)
-                "CAPTURE_FULL" -> handleCapture(cmd, CaptureMode.FULL, sessionId)
+                "CAPTURE_PROBE" -> effectOk = handleCapture(cmd, CaptureMode.PROBE, sessionId)
+                "CAPTURE_FULL" -> effectOk = handleCapture(cmd, CaptureMode.FULL, sessionId)
                 "PAUSE" -> Log.i(TAG, "PAUSE — preview deve pausar (tratado no ViewModel)")
                 "RESUME" -> Log.i(TAG, "RESUME — preview deve retomar")
                 "PING" -> {
@@ -92,12 +93,28 @@ class CommandPollWorker(
                     Log.d(TAG, "PING → heartbeat enviado")
                 }
                 "STOP" -> {
-                    Log.i(TAG, "STOP recebido — aguardar spool drain e enviar end-signal")
-                    // spool drain: aguardar fila zerar (com timeout)
-                    awaitSpoolDrain(sessionId)
-                    sessionRepository?.endSignal(sessionId)
+                    Log.i(TAG, "STOP recebido — drain com verificação antes do end-signal")
+                    // S04.3/S04.4: só sinaliza após drain real; pendência mantém estado.
+                    if (awaitSpoolDrain(sessionId)) {
+                        val endRes = sessionRepository?.endSignal(sessionId)
+                        effectOk = endRes?.isSuccess != false
+                    } else {
+                        Log.w(TAG, "STOP adiado: spool com pendências — sem end-signal")
+                        effectOk = false
+                    }
                 }
-                else -> Log.w(TAG, "Comando desconhecido: ${cmd.command}")
+                else -> {
+                    Log.w(TAG, "Comando desconhecido: ${cmd.command} — cursor preservado")
+                    effectOk = false
+                }
+            }
+            if (effectOk) {
+                try {
+                    sessionRepository?.ackCommand(sessionId, cmd.cursor)
+                } catch (e: Exception) {
+                    Log.w(TAG, "ackCommand falhou cursor=${cmd.cursor}", e)
+                }
+                cursor = cmd.cursor
             }
 
             Result.success(
@@ -119,18 +136,19 @@ class CommandPollWorker(
         cmd: com.pagestoaudio.gateway.network.CommandResponse,
         mode: CaptureMode,
         sessionId: String
-    ) {
+    ): Boolean {
         val source = captureSource
         if (source == null) {
             Log.w(TAG, "CaptureSource não injetado — captura ignorada (deve ocorrer em foreground via ViewModel)")
-            return
+            return false
         }
         val captureId = cmd.captureId ?: "cap-${System.currentTimeMillis()}-${mode.name.lowercase()}"
         val frames = cmd.frames.coerceIn(1, 10)
         val gapMs = cmd.gapMs.coerceIn(0, 5000)
 
+        var allOk = true
         repeat(frames) { idx ->
-            if (!coroutineContext.isActive) return
+            if (!coroutineContext.isActive) return false
             try {
                 Log.i(TAG, "Capturando frame $idx/$frames mode=$mode captureId=$captureId")
                 val captured = source.capture(mode, sessionId, captureId, idx)
@@ -138,30 +156,37 @@ class CommandPollWorker(
                 val pending = (source as? com.pagestoaudio.gateway.camera.PhoneCameraCaptureSource)
                     ?.toPendingFrame(captured, sessionId)
                 if (pending != null) {
-                    spoolRepository?.save(pending)
+                    // S04.4: Result verificado — falha preserva pendência sem cursor.
+                    val saveRes = spoolRepository?.save(pending)
+                    if (saveRes?.isFailure == true) {
+                        allOk = false
+                        Log.e(TAG, "Spool save falhou frame $idx: ${saveRes.exceptionOrNull()?.message}")
+                    }
                 }
                 if (idx < frames - 1 && gapMs > 0) {
                     delay(gapMs)
                 }
             } catch (e: Exception) {
+                allOk = false
                 Log.e(TAG, "Falha ao capturar frame $idx", e)
-                // Não propagar — próximo frame pode suceder; erro será visível no log da SessionScreen
             }
         }
+        return allOk
     }
 
-    private suspend fun awaitSpoolDrain(sessionId: String, timeoutMs: Long = 30_000) {
-        val repo = spoolRepository ?: return
+    private suspend fun awaitSpoolDrain(sessionId: String, timeoutMs: Long = 30_000): Boolean {
+        val repo = spoolRepository ?: return false
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeoutMs) {
             val pending = repo.pendingCountForSession(sessionId)
             if (pending == 0) {
                 Log.i(TAG, "Spool drain completo para session $sessionId")
-                return
+                return true
             }
             Log.d(TAG, "Spool drain aguardando: $pending pendentes")
             delay(1000)
         }
-        Log.w(TAG, "Spool drain timeout após ${timeoutMs}ms — prosseguindo para end-signal")
+        Log.w(TAG, "Spool drain timeout após ${timeoutMs}ms — SEM end-signal com pendências")
+        return false
     }
 }

@@ -10,7 +10,7 @@ from temporalio.worker import Worker
 
 from src.pages_to_audio.config.settings import AppSettings, get_settings
 from src.pages_to_audio.observability.logging import get_logger
-from src.pages_to_audio.workflows.activities.fakes import ALL_FAKE_ACTIVITIES
+from src.pages_to_audio.workflows.activities.real import REAL_ACTIVITIES
 from src.pages_to_audio.workflows.activities.rgb import (
     mark_rgb_result_processing,
     publish_rgb_result,
@@ -39,7 +39,9 @@ async def run_worker(settings: AppSettings | None = None) -> None:
         task_queue=cfg.TEMPORAL_TASK_QUEUE,
         workflows=[ProcessExamWorkflow],
         activities=[
-            *ALL_FAKE_ACTIVITIES,
+            # S05.1: registro operacional SOMENTE com atividades reais.
+            # Fakes vivem só em tests/workflows isolados.
+            *REAL_ACTIVITIES,
             mark_rgb_result_processing,
             publish_rgb_result,
         ],

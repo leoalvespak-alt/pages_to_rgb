@@ -81,11 +81,13 @@ def test_gateway_command_response_shapes() -> None:
 
 
 def test_gateway_command_invalid_command_still_accepted_as_str() -> None:
-    # Contrato exige string, mas lista fechada é validada em runtime no handler;
-    # schema Pydantic aceita qualquer string (não Literal) para compatibilidade firmware.
-    # Garantir que modelo não quebre para valor desconhecido (deve ser logado como WARN).
-    unk = GatewayCommandResponse(command="UNKNOWN_X", cursor=0, session_id="S-1")
-    assert unk.command == "UNKNOWN_X"
+    # S01.2/contrato §3.9: comando desconhecido nunca consome cursor — o schema
+    # Pydantic rejeita (422) em vez de aceitar string arbitrária.
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        GatewayCommandResponse(command="UNKNOWN_X", cursor=0, session_id="S-1")
 
 
 def test_cursor_monotonic_simulated() -> None:

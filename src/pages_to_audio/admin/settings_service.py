@@ -237,14 +237,26 @@ async def update_admin_settings(
         "google_document_ai_processor_version",
     }
     for field in ordinary:
-        if field in data and data[field] is not None:
-            value = data[field]
-            if field in {"palette", "handwritten_palette"}:
-                value = {k: {"rgb": list(v["rgb"])} for k, v in value.items()}
-            if field == "minimum_ratio":
-                value = Decimal(str(value))
-            setattr(row, field, value)
-            changed.append(field)
+        # S01.8/A23: ausente herda; null explícito limpa (só nuláveis);
+        # valor explícito sobrescreve. exclude_unset=True já distingue ausente.
+        if field not in data:
+            continue
+        value = data[field]
+        if value is None:
+            if field in {
+                "google_document_ai_project_id",
+                "google_document_ai_processor_id",
+                "google_document_ai_processor_version",
+            }:
+                setattr(row, field, None)
+                changed.append(field)
+            continue
+        if field in {"palette", "handwritten_palette"}:
+            value = {k: {"rgb": list(v["rgb"])} for k, v in value.items()}
+        if field == "minimum_ratio":
+            value = Decimal(str(value))
+        setattr(row, field, value)
+        changed.append(field)
     for name in ("deepseek", "gemini", "anthropic", "glm"):
         input_field = f"{name}_api_key"
         column = f"{name}_api_key_encrypted"

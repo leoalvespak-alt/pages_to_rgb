@@ -26,22 +26,30 @@ async def providers_for_snapshot(
     if row is None:
         raise RuntimeError("Admin settings are not initialized")
     settings = get_settings()
-    ocr_provider = str((snapshot or {}).get("ocr_provider") or row.ocr_provider)
+    snapshot = snapshot or {}
+    ocr_provider = str(snapshot.get("ocr_provider") or row.ocr_provider)
     if ocr_provider != "google_document_ai":
         raise RuntimeError("Only Google Document AI Enterprise OCR is supported")
     gemini_key = decrypt_secret(row.gemini_api_key_encrypted, settings)
     if not gemini_key:
         raise RuntimeError("Gemini provider key is not configured")
     model_values = [
-        str((snapshot or {}).get(name) or getattr(row, name))
+        str(snapshot.get(name) or getattr(row, name))
         for name in ("solve_model", "verify_model", "arbiter_model")
     ]
     if any(value != "gemini-3.1-pro-preview" for value in model_values):
         raise RuntimeError("Only Gemini 3.1 Pro Preview is supported")
     model = model_values[0]
-    project = row.google_document_ai_project_id
-    location = row.google_document_ai_location
-    processor = row.google_document_ai_processor_id
+    # S05.6/A22: snapshot integral congelado — projeto/localização/processador e
+    # versão vêm do snapshot da sessão; configuração atual só para novas sessões.
+    project = snapshot.get("google_document_ai_project_id") or row.google_document_ai_project_id
+    location = snapshot.get("google_document_ai_location") or row.google_document_ai_location
+    processor = (
+        snapshot.get("google_document_ai_processor_id") or row.google_document_ai_processor_id
+    )
+    processor_version = snapshot.get(
+        "google_document_ai_processor_version", row.google_document_ai_processor_version
+    )
     if not project or not location or not processor:
         raise RuntimeError("Google Document AI project/location/processor is not configured")
     document_credentials = decrypt_secret(row.google_document_ai_credentials_encrypted, settings)
@@ -52,9 +60,9 @@ async def providers_for_snapshot(
         settings,
         storage=get_storage_adapter(),
         credentials_json=document_credentials,
-        project_id=project,
-        location=location,
-        processor_id=processor,
-        processor_version=row.google_document_ai_processor_version,
+        project_id=str(project),
+        location=str(location),
+        processor_id=str(processor),
+        processor_version=str(processor_version) if processor_version else None,
     )
     return ocr, gemini

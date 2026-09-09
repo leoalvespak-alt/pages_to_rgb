@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import time
 from typing import Any
 
@@ -96,6 +94,13 @@ async def _probe_document_ai(row: Any, credentials: str) -> None:
     project = str(getattr(row, "google_document_ai_project_id", "") or "")
     location = str(getattr(row, "google_document_ai_location", "") or "")
     processor = str(getattr(row, "google_document_ai_processor_id", "") or "")
+    await _probe_document_ai_with(project, location, processor, credentials)
+
+
+async def _probe_document_ai_with(
+    project: str, location: str, processor: str, credentials: str
+) -> None:
+    """S06.6: testa a configuração efetivamente proposta (não a salva)."""
     if not project or not location or not processor:
         raise HTTPException(
             status_code=422, detail="Google Document AI project/location/processor is incomplete"
@@ -103,23 +108,15 @@ async def _probe_document_ai(row: Any, credentials: str) -> None:
     if not credentials:
         raise HTTPException(status_code=422, detail="Provider key is not configured")
     try:
-        import google.auth
-        import google.auth.transport.requests
-        from google.oauth2 import service_account
+        # S05.7/A27: save-and-verify usa o mesmo loader do processamento real
+        # (JSON ou caminho), com refresh em thread.
+        from src.pages_to_audio.ocr.credentials import (
+            get_google_access_token,
+            load_google_credentials,
+        )
 
-        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-
-        def load_token() -> str:
-            if credentials.lstrip().startswith("{"):
-                creds = service_account.Credentials.from_service_account_info(
-                    json.loads(credentials), scopes=scopes
-                )
-            else:
-                creds, _ = google.auth.load_credentials_from_file(credentials, scopes=scopes)
-            creds.refresh(google.auth.transport.requests.Request())
-            return str(creds.token)
-
-        token = await asyncio.to_thread(load_token)
+        creds = load_google_credentials(credentials)
+        token = await get_google_access_token(creds)
     except HTTPException:
         raise
     except Exception as exc:
@@ -156,10 +153,23 @@ async def test_provider(
     message: str | None = None
     ok = False
     try:
-        key = _provider_key(row, body.provider)
+        # S06.6/A23: usa a proposta do formulário quando enviada; salva só se omitida.
         if body.provider == "google_document_ai":
-            await _probe_document_ai(row, key)
+            project = body.google_document_ai_project_id or str(
+                getattr(row, "google_document_ai_project_id", "") or ""
+            )
+            location = body.google_document_ai_location or str(
+                getattr(row, "google_document_ai_location", "") or ""
+            )
+            processor = body.google_document_ai_processor_id or str(
+                getattr(row, "google_document_ai_processor_id", "") or ""
+            )
+            credentials = body.google_document_ai_credentials
+            if credentials is None:
+                credentials = _provider_key(row, body.provider)
+            await _probe_document_ai_with(project, location, processor, credentials)
         else:
+            key = body.api_key if body.api_key is not None else _provider_key(row, body.provider)
             await _probe_provider(body.provider, body.model, key)
         ok = True
     except HTTPException:

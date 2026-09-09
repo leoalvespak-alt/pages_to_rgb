@@ -62,7 +62,9 @@ def decide_review(confidence: float, text: str) -> ConfidenceDecision:
 
 def finalize_review(confidence: float, text: str, *, ambiguous: bool = False) -> ConfidenceDecision:
     decision = decide_review(confidence, text)
-    if ambiguous:
+    # S05.9/A29: confiança muito baixa exige revisão manual explícita — nunca
+    # segue silenciosamente para resolução automática.
+    if ambiguous or decision.score < 0.50:
         return ConfidenceDecision(
             decision.score,
             decision.critical,

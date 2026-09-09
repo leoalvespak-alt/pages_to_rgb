@@ -21,6 +21,7 @@ from src.pages_to_audio.db.models.rgb_sequence import RgbSequence
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
 from src.pages_to_audio.domain.enums.audit import AuditEventType, AuditSeverity, AuditStage
+from src.pages_to_audio.domain.enums.session_state import SessionState
 from src.pages_to_audio.rgb.canonical import build_payload, canonical_items_bytes
 from src.pages_to_audio.rgb.delivery import (
     RgbApiError,
@@ -121,6 +122,24 @@ async def publish_rgb_for_session(
 
     settings = get_settings()
     binding = await _internal_binding(db, session_public_id)
+    # S02.10/A18: cerca de cancelamento consultada antes da publicação.
+    try:
+        if SessionState(binding.session.status) == SessionState.CANCELLED:
+            await get_or_create_delivery(
+                db,
+                binding,
+                command=RgbResultCommand.RESULT_CANCELLED,
+                reason_code="SESSION_CANCELLED",
+            )
+            await db.flush()
+            return RgbPublicationResult(
+                sequence=None,
+                command=RgbResultCommand.RESULT_CANCELLED,
+                reason_code="SESSION_CANCELLED",
+                reused=False,
+            )
+    except ValueError:
+        pass
     if not settings.RGB_RESULTS_ENABLED:
         await get_or_create_delivery(
             db,

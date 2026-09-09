@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -13,6 +13,7 @@ from apps.api.dependencies import SettingsDep, UowDep
 from src.pages_to_audio.admin.settings_service import get_effective_admin_settings, rgb_for_answer
 from src.pages_to_audio.auth.gateway import verify_gateway_token
 from src.pages_to_audio.capture.policy import CapturePolicy, build_capture_policy
+from src.pages_to_audio.common.contract_ids import ESP_ID_PATTERN, MAX_EXACT_CURSOR
 from src.pages_to_audio.common.errors import AppError, FrameConflictError, InvalidStateTransition
 from src.pages_to_audio.common.ids import new_public_id
 from src.pages_to_audio.db.models.capture import Capture
@@ -38,12 +39,13 @@ _hw_command_cursors: dict[str, int] = {}
 
 
 class HandwrittenSessionStartRequest(BaseModel):
-    expected_words: int | None = Field(default=10, ge=1, le=1000)
-    expected_pages: int | None = None
-    expected_questions: int | None = None
-    minimum_ratio: float | None = None
+    # S01.8/A20: omitido (None) herda configuração administrativa; nunca default 10.
+    expected_words: int | None = Field(default=None, ge=1, le=1000)
+    expected_pages: int | None = Field(default=None, ge=1, le=100)
+    expected_questions: int | None = Field(default=None, ge=1, le=1000)
+    minimum_ratio: float | None = Field(default=None, gt=0, le=1)
     gateway_code: str = Field(default="", max_length=128)
-    device_code: str = Field(default="CAM-001", min_length=1, max_length=128)
+    device_code: str = Field(default="CAM-001", min_length=1, max_length=63, pattern=ESP_ID_PATTERN)
     capture_source: str = Field(default="ANDROID_CAMERA", pattern="^(ANDROID_CAMERA|ESP32_CAMERA)$")
 
 
@@ -119,6 +121,7 @@ async def handwritten_start(
 
     session_id = new_public_id()
     now = datetime.now(UTC)
+    # S07/contrato §2: perfil low-power explícito em novas sessões.
     session = Session(
         public_id=session_id,
         device_id=device.id,
@@ -135,6 +138,10 @@ async def handwritten_start(
             "expected_pages": ep,
             "expected_questions": eq,
             "minimum_ratio": mr,
+            "rgb_profile": "low-power",
+            "brightness_percent": 12,
+            "on_ms": 150,
+            "off_ms": 2850,
         },
         provider_snapshot={
             "settings_version": admin_settings.version,
@@ -178,8 +185,8 @@ async def get_handwritten_policy(
 
 
 class HandwrittenGatewayCommandResponse(BaseModel):
-    command: str
-    cursor: int
+    command: Literal["CAPTURE_PROBE", "CAPTURE_FULL", "PAUSE", "RESUME", "PING", "STOP"]
+    cursor: int = Field(ge=0, le=MAX_EXACT_CURSOR)
     session_id: str
     capture_id: str | None = None
     frames: int | None = None
@@ -193,10 +200,12 @@ async def get_handwritten_command(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    cursor: int = Query(default=0, ge=0),
+    cursor: int = Query(default=0, ge=0, le=MAX_EXACT_CURSOR),
     wait_ms: int = Query(default=0, ge=0, le=25000),
     phase: str | None = Query(default=None),
 ) -> HandwrittenGatewayCommandResponse:
+    from src.pages_to_audio.capture.commands import next_persistent_command
+
     session = await uow.session.scalar(
         select(Session)
         .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
@@ -210,77 +219,51 @@ async def get_handwritten_command(
     if getattr(session, "session_type", "EXAM") != "HANDWRITTEN_WORD":
         raise HTTPException(status_code=404, detail="Not a handwritten session")
 
-    last = _hw_command_cursors.get(session_id, cursor)
-    next_cursor = max(last + 1, cursor + 1)
-    if cursor >= last:
-        next_cursor = cursor + 1
-    _hw_command_cursors[session_id] = next_cursor
-
     try:
-        state = SessionState(session.status)
-    except ValueError:
-        state = SessionState.CAPTURING
-
-    if state in {SessionState.LOCKED, SessionState.CAPTURE_LOCKING}:
-        return HandwrittenGatewayCommandResponse(
-            command="STOP", cursor=next_cursor, session_id=session_id
+        row = await next_persistent_command(
+            uow.session, session, client_cursor=cursor, phase=phase, wait_ms=wait_ms
         )
-    if state.is_terminal:
-        return HandwrittenGatewayCommandResponse(
-            command="STOP", cursor=next_cursor, session_id=session_id
-        )
-    if state == SessionState.CAPTURING:
-        norm_phase = (phase or "").strip().upper()
-        if norm_phase == "PAUSE":
-            return HandwrittenGatewayCommandResponse(
-                command="PAUSE", cursor=next_cursor, session_id=session_id
-            )
-        if norm_phase == "RESUME":
-            return HandwrittenGatewayCommandResponse(
-                command="RESUME", cursor=next_cursor, session_id=session_id
-            )
-        if norm_phase == "PROBE":
-            cid = f"cap-{next_cursor:03d}-probe"
-            return HandwrittenGatewayCommandResponse(
-                command="CAPTURE_PROBE",
-                cursor=next_cursor,
-                session_id=session_id,
-                capture_id=cid,
-                frames=1,
-                gap_ms=180,
-                frame_size="1280x720",
-                jpeg_quality=75,
-            )
-        if next_cursor % 5 == 0:
-            cid = f"cap-{next_cursor:03d}-probe"
-            return HandwrittenGatewayCommandResponse(
-                command="CAPTURE_PROBE",
-                cursor=next_cursor,
-                session_id=session_id,
-                capture_id=cid,
-                frames=1,
-                gap_ms=180,
-                frame_size="1280x720",
-                jpeg_quality=75,
-            )
-        if next_cursor % 4 == 0:
-            return HandwrittenGatewayCommandResponse(
-                command="PING", cursor=next_cursor, session_id=session_id
-            )
-        cid = f"cap-{next_cursor:03d}-full"
-        return HandwrittenGatewayCommandResponse(
-            command="CAPTURE_FULL",
-            cursor=next_cursor,
-            session_id=session_id,
-            capture_id=cid,
-            frames=1,
-            gap_ms=180,
-            frame_size="UXGA",
-            jpeg_quality=92,
-        )
+        await uow.session.flush()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = row.payload or {}
     return HandwrittenGatewayCommandResponse(
-        command="PING", cursor=next_cursor, session_id=session_id
+        command=row.command,  # type: ignore[arg-type]
+        cursor=int(row.cursor),
+        session_id=session_id,
+        capture_id=payload.get("capture_id"),
+        frames=payload.get("frames"),
+        gap_ms=payload.get("gap_ms"),
+        frame_size=payload.get("frame_size"),
+        jpeg_quality=payload.get("jpeg_quality"),
     )
+
+
+class HandwrittenCommandAckRequest(BaseModel):
+    cursor: int = Field(ge=0, le=MAX_EXACT_CURSOR)
+
+
+@router.post("/session/{session_id}/command/ack")
+async def ack_handwritten_command(
+    session_id: str,
+    body: HandwrittenCommandAckRequest,
+    gateway_id: GatewayIdDep,
+    uow: UowDep,
+) -> dict[str, Any]:
+    from src.pages_to_audio.capture.commands import ack_command
+
+    session = await uow.session.scalar(
+        select(Session)
+        .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
+        .where(Session.public_id == session_id, AndroidGateway.gateway_code == gateway_id)
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    row = await ack_command(uow.session, session, cursor=body.cursor)
+    await uow.session.flush()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Command not found for cursor")
+    return {"session_id": session_id, "cursor": int(row.cursor), "acked": True}
 
 
 @router.post("/session/{session_id}/heartbeat")
@@ -329,9 +312,13 @@ async def upload_frame_handwritten(
     file: UploadFile,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    x_frame_index: int = Header(..., alias="X-Frame-Index"),
-    x_capture_id: str = Header(..., alias="X-Capture-Id"),
-    x_sha256: str = Header(..., alias="X-SHA256"),
+    x_frame_index: int = Header(..., alias="X-Frame-Index", ge=0, le=10000),
+    x_capture_id: str = Header(
+        ..., alias="X-Capture-Id", min_length=1, max_length=63, pattern=ESP_ID_PATTERN
+    ),
+    x_sha256: str = Header(
+        ..., alias="X-SHA256", min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    ),
     x_received_at: str | None = Header(None, alias="X-Received-Android-At"),
     x_resolution: str | None = Header(None, alias="X-Resolution"),
     x_orientation: int | None = Header(None, alias="X-Orientation"),
@@ -349,7 +336,17 @@ async def upload_frame_handwritten(
     if device is None or not device.enabled:
         raise HTTPException(status_code=403, detail="Device disabled")
 
-    data = await file.read()
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > 12 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Frame body exceeds size limit")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     from src.pages_to_audio.capture.frame_upload import FrameUploadRequest
     from src.pages_to_audio.capture.frame_upload import upload_frame as _upload
     from src.pages_to_audio.storage import get_storage_adapter
@@ -390,9 +387,13 @@ async def handwritten_capture_complete(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    capture_id: str = Query(..., min_length=1, max_length=128),
-    received_frames: int = Query(..., ge=0),
+    capture_id: str = Query(..., min_length=1, max_length=63, pattern=ESP_ID_PATTERN),
+    received_frames: int = Query(..., ge=0, le=10000),
 ) -> dict[str, Any]:
+    from sqlalchemy import func
+
+    from src.pages_to_audio.db.models.frame import Frame
+
     session = await uow.session.scalar(
         select(Session)
         .join(AndroidGateway, Session.gateway_id == AndroidGateway.id)
@@ -412,7 +413,13 @@ async def handwritten_capture_complete(
     )
     if cap is None:
         raise HTTPException(status_code=404, detail="Capture not found")
-    cap.received_frames = received_frames
+    confirmed = (
+        await uow.session.scalar(
+            select(func.count()).select_from(Frame).where(Frame.capture_id == cap.id)
+        )
+        or 0
+    )
+    cap.received_frames = int(confirmed)
     cap.status = "complete"
     cap.completed_at = datetime.now(UTC)
     await uow.session.flush()
@@ -420,12 +427,13 @@ async def handwritten_capture_complete(
         "handwritten_capture_complete",
         session_id=session_id,
         capture_id=capture_id,
-        received=received_frames,
+        received=int(confirmed),
     )
     return {
         "session_id": session_id,
         "capture_id": capture_id,
         "received_frames": cap.received_frames,
+        "declared_frames": int(received_frames),
         "status": cap.status,
     }
 
@@ -519,13 +527,22 @@ async def handwritten_end_signal(
     except Exception as exc:
         logger.warning("hw_mark_processing_failed", error=str(exc), session_id=session_id)
     try:
+        from src.pages_to_audio.capture.dispatcher import enqueue_workflow_intent
+
+        await enqueue_workflow_intent(
+            uow.session, session_db_id=session.id, session_public_id=session.public_id
+        )
+        await uow.session.flush()
+    except Exception as exc:
+        logger.warning("hw_workflow_outbox_failed", error=str(exc), session_id=session_id)
+        raise HTTPException(status_code=500, detail="Failed to persist processing intent") from exc
+    try:
         temporal_addr = getattr(settings, "TEMPORAL_ADDRESS", "")
         if temporal_addr:
-            from src.pages_to_audio.workflows.starter import TemporalWorkflowStarter
+            from src.pages_to_audio.capture.dispatcher import dispatch_pending
 
-            starter = TemporalWorkflowStarter()
-            await starter.start_process_exam(session.public_id)
-            logger.info("hw_workflow_start_after_lock", session_id=session_id)
+            await dispatch_pending(uow.session)
+            await uow.session.flush()
     except Exception as exc:
         logger.warning("hw_workflow_start_failed", error=str(exc), session_id=session_id)
     logger.info("hw_end_signal", session_id=session_id, status=session.status)

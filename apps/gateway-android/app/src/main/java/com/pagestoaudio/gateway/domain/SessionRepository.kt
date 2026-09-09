@@ -213,6 +213,18 @@ class SessionRepository(
         }
     }
 
+    /** S02.8/S04.5: confirma efeito durável do comando (repetir GET não altera estado). */
+    suspend fun ackCommand(sessionId: String, cursor: Long): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = api.ackCommand(sessionId, com.pagestoaudio.gateway.network.CommandAckRequest(cursor))
+                if (resp.isSuccessful) Result.success(Unit)
+                else Result.failure(IllegalStateException("ackCommand ${resp.code()}"))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
     suspend fun fetchRgbTest(sessionId: String, afterId: Int) = withContext(Dispatchers.IO) {
         try {
             val resp = api.getRgbTest(sessionId, afterId)

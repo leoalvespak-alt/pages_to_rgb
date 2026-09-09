@@ -106,16 +106,15 @@ class GoogleTTSProvider:
         if not self._credentials_path:
             return ""
         try:
-            import google.auth  # type: ignore[import-untyped]
-            import google.auth.transport.requests  # type: ignore[import-untyped]
+            # S05.7: mesmo loader compartilhado do OCR + refresh em thread com reuso.
 
-            creds, _ = google.auth.load_credentials_from_file(
-                self._credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            from src.pages_to_audio.ocr.credentials import (
+                get_google_access_token,
+                load_google_credentials,
             )
-            auth_req = google.auth.transport.requests.Request()
-            creds.refresh(auth_req)
-            return str(creds.token) if creds.token else ""
+
+            creds = load_google_credentials(None, file_fallback=self._credentials_path)
+            return await get_google_access_token(creds)
         except Exception as exc:
             raise NonRetryableError(
                 f"Google TTS auth failed: {exc}",

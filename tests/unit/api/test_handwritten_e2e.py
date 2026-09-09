@@ -8,7 +8,7 @@ import pytest
 from apps.api.main import create_app
 from src.pages_to_audio.handwritten.mapping import word_to_letter
 from src.pages_to_audio.rgb.canonical import build_payload, canonical_items_bytes
-from src.pages_to_audio.rgb.policy import HANDWRITTEN_PALETTE, DEFAULT_PALETTE
+from src.pages_to_audio.rgb.policy import DEFAULT_PALETTE, HANDWRITTEN_PALETTE
 
 
 @pytest.mark.unit
@@ -103,8 +103,9 @@ def test_word_mapping_to_rgb_via_canonical() -> None:
 
 @pytest.mark.unit
 def test_r2_storage_adapter_exists_and_respects_immutable() -> None:
-    from src.pages_to_audio.storage.r2_storage import R2StorageAdapter
     import asyncio
+
+    from src.pages_to_audio.storage.r2_storage import R2StorageAdapter
 
     adapter = R2StorageAdapter()
     # fake fallback

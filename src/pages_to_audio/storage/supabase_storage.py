@@ -49,8 +49,8 @@ class SupabaseStorageAdapter:
         sha256: str,
         overwrite: bool = False,
     ) -> StoredObject:
-        if not overwrite and bucket in _IMMUTABLE_BUCKETS:
-            # Check existence first; reject overwrite
+        if not overwrite and bucket == "pages-originals":
+            # S02.5: imutabilidade por papel lógico (nome customizado resolvido depois).
             if await self.object_exists(bucket, key):
                 raise StorageOverwriteForbidden(bucket, key)
 
@@ -98,9 +98,21 @@ class SupabaseStorageAdapter:
                     self._storage_url(bucket, key),
                     headers=self._headers(),
                 )
-                return resp.status_code == 200
-            except httpx.TimeoutException:
-                return False
+                # S02.5: só 404 é inexistência; 5xx/timeout propagam como erro,
+                # nunca como "ausente" (evita corrida check-then-write mascarada).
+                if resp.status_code == 200:
+                    return True
+                if resp.status_code == 404:
+                    return False
+                raise StorageError(
+                    f"Storage HEAD failed: {resp.status_code}",
+                    reason_code=ReasonCode.STORAGE_UPLOAD_FAILED,
+                )
+            except httpx.TimeoutException as exc:
+                raise StorageError(
+                    "Storage HEAD timeout",
+                    reason_code=ReasonCode.STORAGE_TIMEOUT,
+                ) from exc
 
     async def get_object(self, bucket: str, key: str) -> bytes:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

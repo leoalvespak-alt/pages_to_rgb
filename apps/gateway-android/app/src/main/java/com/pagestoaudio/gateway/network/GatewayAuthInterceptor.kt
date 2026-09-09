@@ -5,29 +5,40 @@ import okhttp3.Response
 
 /**
  * Interceptor OkHttp que adiciona autenticação do Gateway em todas as requisições HTTPS
- * para o VPS, conforme ANDROID_GATEWAY_CONTRACT.md (X-Device-Id, Authorization, X-Firmware-Version).
+ * para o VPS, conforme INTEGRACAO_CONSOLIDADA §3 + servidor auth/gateway.py.
  *
- * O hotspot WPA2 protege o enlace local; o Android deve usar HTTPS/TLS nas chamadas para o VPS.
+ * Cloud: Authorization: Bearer <gateway-token> + X-Gateway-Id (obrigatórios).
+ * Metadados: X-Device-Id, X-Firmware-Version, X-Capture-Source.
+ * Nunca envia Bearer vazio (S01.3/A02): sem credencial provisionada a request
+ * segue sem Authorization para o servidor responder 401 explícito.
  */
 class GatewayAuthInterceptor(
     private val deviceIdProvider: () -> String,
     private val deviceSecretProvider: () -> String?,
-    private val firmwareVersionProvider: () -> String = { "gateway-android/1.0.0" }
+    private val firmwareVersionProvider: () -> String = { "gateway-android/1.0.0" },
+    private val gatewayIdProvider: () -> String? = { null },
+    private val gatewaySecretProvider: () -> String? = null
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val deviceId = deviceIdProvider()
-        val secret = deviceSecretProvider()
+        val deviceSecret = deviceSecretProvider()
         val fw = firmwareVersionProvider()
+        // S01.3: identidade cloud provisionada tem precedência sobre segredo legado.
+        val gatewayId = gatewayIdProvider()
+        val gatewaySecret = gatewaySecretProvider() ?: deviceSecret
 
         val builder = original.newBuilder()
             .header("X-Device-Id", deviceId)
             .header("X-Firmware-Version", fw)
             .header("X-Capture-Source", "ANDROID_CAMERA")
 
-        if (!secret.isNullOrBlank()) {
-            builder.header("Authorization", "Bearer $secret")
+        if (!gatewayId.isNullOrBlank()) {
+            builder.header("X-Gateway-Id", gatewayId)
+        }
+        if (!gatewaySecret.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $gatewaySecret")
         }
 
         return chain.proceed(builder.build())

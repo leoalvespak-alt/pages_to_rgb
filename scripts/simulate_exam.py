@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import random
 import time
 
-from scripts.simulate_android import GATEWAY_ID, GATEWAY_TOKEN, _headers, _make_jpeg_bytes, _sha256
-
 import httpx
+
+from scripts.simulate_android import _headers, _make_jpeg_bytes, _sha256
 
 BASE_URL = "http://localhost:8000/api/v1"
 

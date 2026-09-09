@@ -7,6 +7,7 @@ from src.pages_to_audio.db.models.device import Device
 from src.pages_to_audio.db.models.final_answer import FinalAnswer
 from src.pages_to_audio.db.models.frame import Frame
 from src.pages_to_audio.db.models.gateway import AndroidGateway
+from src.pages_to_audio.db.models.gateway_command import GatewayCommand
 from src.pages_to_audio.db.models.idempotency_key import IdempotencyKey
 from src.pages_to_audio.db.models.image_artifact import ImageArtifact
 from src.pages_to_audio.db.models.knowledge_chunk import KnowledgeChunk
@@ -22,6 +23,7 @@ from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.db.models.session_result_delivery import SessionResultDelivery
 from src.pages_to_audio.db.models.storage_orphan import StorageOrphan
+from src.pages_to_audio.db.models.workflow_outbox import WorkflowOutbox
 
 __all__ = [
     "AdminSettings",
@@ -33,6 +35,7 @@ __all__ = [
     "Device",
     "FinalAnswer",
     "Frame",
+    "GatewayCommand",
     "IdempotencyKey",
     "ImageArtifact",
     "KnowledgeChunk",
@@ -48,4 +51,5 @@ __all__ = [
     "Session",
     "SessionResultDelivery",
     "StorageOrphan",
+    "WorkflowOutbox",
 ]

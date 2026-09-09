@@ -110,7 +110,7 @@ def run_simulation(base_url: str, words: list[str] | None = None) -> None:
         )
         dup = resp.json().get("duplicate")
         status = "dup" if dup else "ok" if resp.status_code == 200 else resp.text
-        print(f"  frame {idx} word={word} -> {resp.status_code} {status}")  # noqa: E501
+        print(f"  frame {idx} word={word} -> {resp.status_code} {status}")
     r = client.post(
         f"/handwritten/session/{session_id}/capture-complete",
         params={"capture_id": capture_id, "received_frames": len(words)},

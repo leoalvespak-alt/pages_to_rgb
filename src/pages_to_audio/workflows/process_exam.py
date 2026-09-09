@@ -7,27 +7,27 @@ from typing import Any
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from src.pages_to_audio.workflows.activities.fakes import (
-        fake_arbitrate_disagreements,
-        fake_assemble_final_audio,
-        fake_complete_session,
-        fake_emit_post_correction_status,
-        fake_emit_pre_correction_status,
-        fake_evaluate_gate1,
-        fake_evaluate_gate2,
-        fake_generate_answer_audio,
-        fake_materialize_logical_pages,
-        fake_preprocess_pages,
-        fake_publish_final_audio,
-        fake_reconstruct_exam,
-        fake_rescue_failed_answers,
-        fake_rescue_incomplete_questions,
-        fake_retrieve_knowledge,
-        fake_run_ocr,
-        fake_solve_questions,
-        fake_validate_final_audio,
-        fake_validate_locked_session,
-        fake_verify_questions,
+    from src.pages_to_audio.workflows.activities.real import (
+        arbitrate_disagreements,
+        assemble_final_audio,
+        complete_session,
+        emit_post_correction_status,
+        emit_pre_correction_status,
+        evaluate_gate1,
+        evaluate_gate2,
+        generate_answer_audio,
+        materialize_logical_pages,
+        preprocess_pages,
+        publish_final_audio,
+        reconstruct_exam,
+        rescue_failed_answers,
+        rescue_incomplete_questions,
+        retrieve_knowledge,
+        run_ocr,
+        solve_questions,
+        validate_final_audio,
+        validate_locked_session,
+        verify_questions,
     )
     from src.pages_to_audio.workflows.policies import (
         FFMPEG_ACTIVITY_OPTS,
@@ -81,34 +81,34 @@ class ProcessExamWorkflow:
         )
 
         # Step 1 — ValidateLockedSession
-        await workflow.execute_activity(fake_validate_locked_session, sid, **QUICK_ACTIVITY_OPTS)
+        await workflow.execute_activity(validate_locked_session, sid, **QUICK_ACTIVITY_OPTS)
 
         # Step 2 — MaterializeLogicalPages
-        await workflow.execute_activity(fake_materialize_logical_pages, sid, **IMAGE_ACTIVITY_OPTS)
+        await workflow.execute_activity(materialize_logical_pages, sid, **IMAGE_ACTIVITY_OPTS)
 
         # Step 3 — PreprocessPages
-        await workflow.execute_activity(fake_preprocess_pages, sid, **IMAGE_ACTIVITY_OPTS)
+        await workflow.execute_activity(preprocess_pages, sid, **IMAGE_ACTIVITY_OPTS)
 
         # Step 4 — RunOCR
-        await workflow.execute_activity(fake_run_ocr, sid, **OCR_ACTIVITY_OPTS)
+        await workflow.execute_activity(run_ocr, sid, **OCR_ACTIVITY_OPTS)
 
         # Step 5 — ReconstructExam
-        await workflow.execute_activity(fake_reconstruct_exam, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+        await workflow.execute_activity(reconstruct_exam, sid, **LLM_SOLVER_ACTIVITY_OPTS)
 
         # Step 6 — RescueIncompleteQuestions
         await workflow.execute_activity(
-            fake_rescue_incomplete_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS
+            rescue_incomplete_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS
         )
 
         # Step 7 — EvaluateGate1
         gate1_result: dict[str, Any] = await workflow.execute_activity(
-            fake_evaluate_gate1, sid, **QUICK_ACTIVITY_OPTS
+            evaluate_gate1, sid, **QUICK_ACTIVITY_OPTS
         )
         gate1_passed: bool = gate1_result.get("passed", False)
 
         # Step 8 — EmitPreCorrectionStatus
         await workflow.execute_activity(
-            fake_emit_pre_correction_status,
+            emit_pre_correction_status,
             args=[sid, gate1_result],
             **QUICK_ACTIVITY_OPTS,
         )
@@ -119,34 +119,34 @@ class ProcessExamWorkflow:
         if gate1_passed:
             # Step 9 — RetrieveKnowledge (§9, Gate 1 guard — Invariant 5)
             await workflow.execute_activity(
-                fake_retrieve_knowledge, sid, **LLM_SOLVER_ACTIVITY_OPTS
+                retrieve_knowledge, sid, **LLM_SOLVER_ACTIVITY_OPTS
             )
 
             # Step 10 — SolveQuestions (Invariant 5: unreachable without Gate 1)
-            await workflow.execute_activity(fake_solve_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await workflow.execute_activity(solve_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
 
             # Step 11 — VerifyQuestions
-            await workflow.execute_activity(fake_verify_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await workflow.execute_activity(verify_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
 
             # Step 12 — ArbitrateDisagreements
             await workflow.execute_activity(
-                fake_arbitrate_disagreements, sid, **LLM_ARBITER_ACTIVITY_OPTS
+                arbitrate_disagreements, sid, **LLM_ARBITER_ACTIVITY_OPTS
             )
 
             # Step 13 — RescueFailedAnswers
             await workflow.execute_activity(
-                fake_rescue_failed_answers, sid, **LLM_SOLVER_ACTIVITY_OPTS
+                rescue_failed_answers, sid, **LLM_SOLVER_ACTIVITY_OPTS
             )
 
             # Step 14 — EvaluateGate2
             gate2_result = await workflow.execute_activity(
-                fake_evaluate_gate2, sid, **QUICK_ACTIVITY_OPTS
+                evaluate_gate2, sid, **QUICK_ACTIVITY_OPTS
             )
             gate2_passed = gate2_result.get("passed", False)
 
         # Step 15 — EmitPostCorrectionStatus (always — includes failure status)
         await workflow.execute_activity(
-            fake_emit_post_correction_status,
+            emit_post_correction_status,
             args=[sid, gate2_result],
             **QUICK_ACTIVITY_OPTS,
         )
@@ -163,14 +163,14 @@ class ProcessExamWorkflow:
         if gate2_passed:
             # Steps 16-19 -- TTS pipeline (Invariant 6: unreachable without Gate 2)
             await workflow.execute_activity(
-                fake_generate_answer_audio, sid, **LLM_SOLVER_ACTIVITY_OPTS
+                generate_answer_audio, sid, **LLM_SOLVER_ACTIVITY_OPTS
             )
-            await workflow.execute_activity(fake_assemble_final_audio, sid, **FFMPEG_ACTIVITY_OPTS)
-            await workflow.execute_activity(fake_validate_final_audio, sid, **QUICK_ACTIVITY_OPTS)
-            await workflow.execute_activity(fake_publish_final_audio, sid, **STORAGE_ACTIVITY_OPTS)
+            await workflow.execute_activity(assemble_final_audio, sid, **FFMPEG_ACTIVITY_OPTS)
+            await workflow.execute_activity(validate_final_audio, sid, **QUICK_ACTIVITY_OPTS)
+            await workflow.execute_activity(publish_final_audio, sid, **STORAGE_ACTIVITY_OPTS)
 
         # Step 20 — CompleteSession
-        final = await workflow.execute_activity(fake_complete_session, sid, **QUICK_ACTIVITY_OPTS)
+        final = await workflow.execute_activity(complete_session, sid, **QUICK_ACTIVITY_OPTS)
 
         return {
             "session_id": sid,

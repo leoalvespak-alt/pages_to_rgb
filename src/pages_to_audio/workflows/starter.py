@@ -7,8 +7,10 @@ Calling start twice with the same ID is a no-op (Temporal dedup).
 from __future__ import annotations
 
 from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
+from src.pages_to_audio.config.settings import get_settings
 from src.pages_to_audio.observability.logging import get_logger
 from src.pages_to_audio.workflows.client import get_temporal_client
 from src.pages_to_audio.workflows.process_exam import ProcessExamWorkflow
@@ -36,25 +38,36 @@ class TemporalWorkflowStarter:
     async def start_process_exam(
         self, session_public_id: str, *, operation_suffix: str | None = None
     ) -> None:
-        client = await self._get_client()
         wf_id = _workflow_id(session_public_id)
         if operation_suffix:
             wf_id = f"{wf_id}-retry-{operation_suffix}"
+        await self.start_process_exam_by_workflow_id(wf_id, session_public_id=session_public_id)
+
+    async def start_process_exam_by_workflow_id(
+        self, workflow_id: str, *, session_public_id: str | None = None
+    ) -> None:
+        """S02.9/S05.3: task queue explícita da config; AlreadyStarted idempotente."""
+        client = await self._get_client()
+        # S05.3: nunca client._config privado; mesma fila do worker.
+        task_queue = get_settings().TEMPORAL_TASK_QUEUE
+        arg = session_public_id or workflow_id.replace(f"{WORKFLOW_ID_PREFIX}-", "", 1)
         try:
             handle = await client.start_workflow(
                 ProcessExamWorkflow.run,
-                session_public_id,
-                id=wf_id,
-                task_queue=client._config.get("task_queue", "pages-to-audio-main"),  # type: ignore[attr-defined]
+                arg,
+                id=workflow_id,
+                task_queue=task_queue,
             )
             logger.info(
                 "workflow_started",
-                workflow_id=wf_id,
+                workflow_id=workflow_id,
                 run_id=handle.result_run_id,
-                session_id=session_public_id,
+                session_id=arg,
             )
+        except WorkflowAlreadyStartedError:
+            logger.info("workflow_already_started", workflow_id=workflow_id)
         except RPCError as exc:
             if "already started" in str(exc).lower():
-                logger.info("workflow_already_started", workflow_id=wf_id)
+                logger.info("workflow_already_started", workflow_id=workflow_id)
             else:
                 raise
