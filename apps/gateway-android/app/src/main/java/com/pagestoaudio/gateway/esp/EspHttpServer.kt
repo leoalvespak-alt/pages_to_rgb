@@ -43,12 +43,23 @@ class EspHttpServer(
 
     /** Ponte para o cloud (implementada pelo Service a partir do SessionRepository). */
     interface EspCloudBridge {
-        suspend fun startForDevice(deviceId: String, resumeHint: Boolean, lastSessionId: String?): CloudSession
+        suspend fun startForDevice(deviceId: String, resumeHint: Boolean, lastSessionId: String?, allowNewSession: Boolean): CloudSession
         suspend fun enqueueCloudUpload(frame: PendingFrame)
         suspend fun cloudCaptureComplete(sessionId: String, captureId: String, frames: Int): Boolean
-        suspend fun cloudCommand(sessionId: String, cursor: Long): CloudCommand?
+        /** Comando integral (payload JSON completo, nunca "{}" fixo). */
+        suspend fun cloudCommand(sessionId: String, cursor: Long, phase: String, waitMs: Long): CloudCommand?
+        /** Resultado integral serializado (todos os campos, nunca só command/cursor). */
         suspend fun cloudResult(sessionId: String, cursor: Long): String?
+        suspend fun cloudHeartbeat(sessionId: String, deviceId: String, state: String, rssi: Int, cameraProfile: String): Boolean
+        /** Fault é evento local durável (sem rota cloud em INTEGRACAO rev.1); retorna se persistiu. */
+        suspend fun cloudFault(deviceId: String, code: String, detail: String, cameraProfile: String): Boolean
+        /** Sequência RGB integral serializada (answers/palette/sha256 preservados). */
+        suspend fun cloudRgbSequence(sessionId: String, sequenceId: String?): String?
+        suspend fun cloudRgbEvent(sessionId: String, sequenceId: String, revision: Int, event: String, nextIndex: Int, itemCount: Int, deviceId: String): Boolean
     }
+
+    /** Erro cloud com código HTTP preservado (401/403/404/409/422/503 têm semântica distinta). */
+    class CloudException(val code: Int, message: String) : Exception(message)
 
     data class CloudSession(val sessionId: String, val resumed: Boolean, val cursor: Long)
     data class CloudCommand(val command: String, val cursor: Long, val payload: String)
@@ -97,9 +108,18 @@ class EspHttpServer(
                 val path = req.path
                 val response: Pair<Int, String> = when {
                     req.method == "GET" && path == "/v1/hello" -> hello(req)
+                    req.method == "POST" && path == "/v1/device/hello" -> deviceHello(req)
                     req.method == "POST" && path == "/v1/device/start" -> deviceStart(req)
                     req.method == "POST" && path == "/v1/device/frame" -> deviceFrame(req)
                     req.method == "POST" && path == "/v1/device/capture-complete" -> deviceCaptureComplete(req)
+                    req.method == "POST" && path == "/v1/device/heartbeat" -> deviceHeartbeat(req)
+                    req.method == "POST" && path == "/v1/device/fault" -> deviceFault(req)
+                    req.method == "GET" && path == "/v1/device/rgb-sequence" -> deviceRgbSequence(req)
+                    req.method == "POST" && path == "/v1/device/rgb-sequence/event" -> deviceRgbEvent(req)
+                    req.method == "GET" && path == "/v1/device/diagnostics" -> diagStatus(req)
+                    req.method == "POST" && path == "/v1/device/diagnostics" -> diagStart(req)
+                    req.method == "POST" && path == "/v1/device/diagnostics/frame" -> diagFrame(req)
+                    req.method == "POST" && path == "/v1/device/diagnostics/stop" -> diagStop(req)
                     req.method == "GET" && path == "/v1/device/command" -> deviceCommand(req)
                     req.method == "GET" && path == "/v1/device/result" -> deviceResult(req)
                     req.method == "POST" && path == "/v1/device/event" -> deviceEvent(req)
@@ -115,11 +135,165 @@ class EspHttpServer(
     // ── Rotas ──────────────────────────────────────────────────────────────
 
     private fun hello(req: HttpRequest): Pair<Int, String> {
+        // Alias público de presença (sem estado). Canônico autenticado: POST /v1/device/hello.
         val body = JSONObject()
             .put("schema", "p2a-esp/1")
+            .put("local_protocol", "P2A-LOCAL/1")
+            .put("deprecated", "use POST /v1/device/hello")
             .put("gateway_id", provisioning.gatewayId())
-            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event")))
+            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "camera_diagnostics_v1")))
         return 200 to body.toString()
+    }
+
+    // ── Autenticação local (C01/RA02) ─────────────────────────────────────
+    // Toda rota protegida exige dispositivo pareado + Bearer válido. NENHUMA
+    // rota cria credencial: pareamento é só pela tela do app (importDeviceSecret).
+
+    private fun bearerOf(req: HttpRequest): String? =
+        req.headers["authorization"]?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** null = autorizado; senão a resposta de erro a devolver. */
+    private fun requireAuth(req: HttpRequest, deviceId: String): Pair<Int, String>? {
+        if (!isValidEspId(deviceId)) {
+            return 422 to JSONObject().put("error", "invalid device_id").toString()
+        }
+        if (!provisioning.isDeviceProvisioned(deviceId)) {
+            return 401 to JSONObject()
+                .put("error", "device not paired")
+                .put("code", "DEVICE_NOT_PROVISIONED")
+                .toString()
+        }
+        if (!provisioning.validateDevice(deviceId, bearerOf(req))) {
+            return 401 to JSONObject().put("error", "unauthorized device").toString()
+        }
+        return null
+    }
+
+    /** POST /v1/device/hello canônico (o firmware usa este; GET /v1/hello é alias). */
+    private fun deviceHello(req: HttpRequest): Pair<Int, String> {
+        val json = try { JSONObject(req.bodyAsText()) } catch (_: Exception) {
+            return 400 to JSONObject().put("error", "invalid json").toString()
+        }
+        val deviceId = json.optString("device_id", "")
+        // HELLO nunca abre sessão nem altera domínio; só presença + capacidades.
+        requireAuth(req, deviceId)?.let { return it }
+        val body = JSONObject()
+            .put("schema", "p2a-esp/1")
+            .put("local_protocol", "P2A-LOCAL/1")
+            .put("gateway_id", provisioning.gatewayId())
+            .put("device_id", deviceId)
+            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "camera_diagnostics_v1")))
+        return 200 to body.toString()
+    }
+
+    // ── Diagnóstico de câmera (D02/D04 — delega ao forwarder quando ligado) ──
+    // Hook mínimo: sem forwarder configurado, responde 501 controlado.
+    var diagForwarder: com.pagestoaudio.gateway.diag.CameraDiagnosticsForwarder? = null
+
+    private suspend fun diagStatus(req: HttpRequest): Pair<Int, String> {
+        val fwd = diagForwarder
+        if (!com.pagestoaudio.gateway.diag.DiagConfig.diagnosticsEnabled || fwd == null) {
+            return 501 to JSONObject().put("error", "camera diagnostics disabled").toString()
+        }
+        val id = req.query["diagnostic_id"]
+        val deviceId = req.query["device_id"] ?: ""
+        // Estado de teste também exige pareamento: sem info para estranhos.
+        requireAuth(req, deviceId)?.let { return it }
+        val active = fwd.isActive(id)
+        val request = fwd.activeRequest()
+        return 200 to JSONObject()
+            .put("active", active)
+            .put("diagnostic_id", request?.diagnosticId)
+            .put("mode", request?.mode?.name)
+            .put("resolution", request?.resolution)
+            .put("jpeg_quality", request?.jpegQuality)
+            .put("duration_s", request?.durationS)
+            .put("max_frames", request?.maxFrames)
+            .toString()
+    }
+
+    private suspend fun diagStart(req: HttpRequest): Pair<Int, String> {
+        val fwd = diagForwarder
+        if (!com.pagestoaudio.gateway.diag.DiagConfig.diagnosticsEnabled || fwd == null) {
+            return 501 to JSONObject().put("error", "camera diagnostics disabled").toString()
+        }
+        return try {
+            val json = JSONObject(req.bodyAsText())
+            val diagId = json.optString("diagnostic_id", "")
+            val deviceId = json.optString("device_id", "")
+            val mode = json.optString("mode", "PHOTO")
+            if (!isValidEspId(diagId) || !isValidEspId(deviceId)) {
+                return 422 to JSONObject().put("error", "invalid diagnostic identity").toString()
+            }
+            requireAuth(req, deviceId)?.let { return it }
+            // Nunca aciona CameraX: só encaminha controle à ESP; origem é a placa.
+            val ok = fwd.start(
+                com.pagestoaudio.gateway.diag.DiagRequest(
+                    diagnosticId = diagId, deviceId = deviceId,
+                    mode = runCatching { com.pagestoaudio.gateway.diag.DiagMode.valueOf(mode) }
+                        .getOrDefault(com.pagestoaudio.gateway.diag.DiagMode.PHOTO),
+                    resolution = json.optString("resolution", "SVGA"),
+                    jpegQuality = json.optInt("jpeg_quality", 18),
+                    durationS = json.optInt("duration_s", 60).coerceIn(1, 60),
+                    maxFrames = json.optInt("max_frames", 1).coerceIn(1, 60),
+                )
+            )
+            if (ok) 200 to JSONObject().put("accepted", true).toString()
+            else 409 to JSONObject().put("error", "busy").toString()
+        } catch (_: Exception) {
+            400 to JSONObject().put("error", "invalid json").toString()
+        }
+    }
+
+    private suspend fun diagFrame(req: HttpRequest): Pair<Int, String> {
+        val fwd = diagForwarder
+        if (!com.pagestoaudio.gateway.diag.DiagConfig.diagnosticsEnabled || fwd == null) {
+            return 501 to JSONObject().put("error", "camera diagnostics disabled").toString()
+        }
+        val deviceId = req.headers["x-device-id"] ?: ""
+        val secret = req.headers["authorization"]?.removePrefix("Bearer ")?.trim()
+        if (!provisioning.validateDevice(deviceId, secret)) {
+            return 401 to JSONObject().put("error", "unauthorized device").toString()
+        }
+        val diagId = req.headers["x-diagnostic-id"] ?: ""
+        val frameIndex = req.headers["x-frame-index"]?.toIntOrNull()
+        val sha = req.headers["x-sha256"] ?: ""
+        val monoMs = req.headers["x-captured-mono-ms"]?.toLongOrNull() ?: 0L
+        if (!isValidEspId(diagId) || frameIndex == null || frameIndex < 0 ||
+            !sha.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+            return 422 to JSONObject().put("error", "invalid diagnostic headers").toString()
+        }
+        if (req.body.size > MAX_BODY || req.body.size < 128 || !isJpeg(req.body)) {
+            return 415 to JSONObject().put("error", "not a jpeg").toString()
+        }
+        val bounds = decodeBounds(req.body)
+        return when (val code = fwd.onDeviceFrame(diagId, frameIndex, sha, req.body, monoMs, bounds.first, bounds.second)) {
+            201 -> 201 to JSONObject().put("diagnostic_id", diagId).put("frame_index", frameIndex).put("sha256", sha).toString()
+            208 -> 208 to JSONObject().put("diagnostic_id", diagId).put("duplicate", true).toString()
+            202 -> 202 to JSONObject().put("diagnostic_id", diagId).put("transient", true).toString()
+            413 -> 413 to JSONObject().put("error", "quota exceeded").toString()
+            else -> 409 to JSONObject().put("error", "not accepting").toString()
+        }
+    }
+
+    private suspend fun diagStop(req: HttpRequest): Pair<Int, String> {
+        val fwd = diagForwarder
+        if (!com.pagestoaudio.gateway.diag.DiagConfig.diagnosticsEnabled || fwd == null) {
+            return 501 to JSONObject().put("error", "camera diagnostics disabled").toString()
+        }
+        return try {
+            val json = JSONObject(req.bodyAsText())
+            val diagId = json.optString("diagnostic_id", "")
+            val deviceId = json.optString("device_id", "")
+            if (!isValidEspId(diagId) || !isValidEspId(deviceId)) {
+                return 422 to JSONObject().put("error", "invalid diagnostic identity").toString()
+            }
+            requireAuth(req, deviceId)?.let { return it }
+            fwd.stop("esp-stop")
+            200 to JSONObject().put("released", true).toString()
+        } catch (_: Exception) {
+            400 to JSONObject().put("error", "invalid json").toString()
+        }
     }
 
     private suspend fun deviceStart(req: HttpRequest): Pair<Int, String> {
@@ -127,16 +301,13 @@ class EspHttpServer(
             return 400 to JSONObject().put("error", "invalid json").toString()
         }
         val deviceId = json.optString("device_id", "")
-        if (!isValidEspId(deviceId)) return 422 to JSONObject().put("error", "invalid device_id").toString()
+        // C01/RA02: sem criação implícita de credencial por pedido não autenticado.
+        requireAuth(req, deviceId)?.let { return it }
         val resumeHint = json.optBoolean("resume_hint", false)
+        val allowNew = if (json.has("allow_new_session")) json.optBoolean("allow_new_session", true) else !resumeHint
         val lastSessionId = json.optString("last_session_id", null)?.takeIf { it.isNotBlank() }
-        // Provisiona segredo do dispositivo no primeiro contato em bancada; em
-        // produção exige provisionamento prévio (sem fallback inseguro automático).
-        if (!provisioning.isDeviceProvisioned(deviceId)) {
-            provisioning.getOrCreateDeviceSecret(deviceId)
-        }
         return try {
-            val session = cloud.startForDevice(deviceId, resumeHint, lastSessionId)
+            val session = cloud.startForDevice(deviceId, resumeHint, lastSessionId, allowNew)
             deviceSessions[deviceId] = session
             200 to JSONObject()
                 .put("session_id", session.sessionId)
@@ -144,6 +315,11 @@ class EspHttpServer(
                 .put("cursor", session.cursor)
                 .put("gateway_id", provisioning.gatewayId())
                 .toString()
+        } catch (e: CloudException) {
+            // C01/RA03: propaga 401/403/404/409/422 com semântica; resto vira 503.
+            val code = if (e.code in listOf(400, 401, 403, 404, 409, 410, 422)) e.code else 503
+            Log.w(TAG, "deviceStart cloud $code", e)
+            code to JSONObject().put("error", e.message ?: "cloud unavailable").put("code", e.code).toString()
         } catch (e: Exception) {
             Log.w(TAG, "deviceStart falhou", e)
             503 to JSONObject().put("error", "cloud unavailable").toString()
@@ -153,10 +329,7 @@ class EspHttpServer(
     private suspend fun deviceFrame(req: HttpRequest): Pair<Int, String> {
         // S03.6: valida limites antes de aceitar; JPEG real verificado.
         val deviceId = req.headers["x-device-id"] ?: ""
-        val secret = req.headers["authorization"]?.removePrefix("Bearer ")?.trim()
-        if (!provisioning.validateDevice(deviceId, secret)) {
-            return 401 to JSONObject().put("error", "unauthorized device").toString()
-        }
+        requireAuth(req, deviceId)?.let { return it }
         val captureId = req.headers["x-capture-id"] ?: ""
         val frameIndex = req.headers["x-frame-index"]?.toIntOrNull()
         val sha = req.headers["x-sha256"] ?: ""
@@ -235,6 +408,7 @@ class EspHttpServer(
             return 400 to JSONObject().put("error", "invalid json").toString()
         }
         val deviceId = json.optString("device_id", "")
+        requireAuth(req, deviceId)?.let { return it }
         val sessionId = json.optString("session_id", "")
         val captureId = json.optString("capture_id", "")
         val frames = json.optInt("frames", -1)
@@ -253,11 +427,25 @@ class EspHttpServer(
 
     private suspend fun deviceCommand(req: HttpRequest): Pair<Int, String> {
         val deviceId = req.query["device_id"] ?: ""
+        requireAuth(req, deviceId)?.let { return it }
         val cursor = req.query["cursor"]?.toLongOrNull() ?: 0L
+        val waitMs = req.query["wait_ms"]?.toLongOrNull()?.coerceIn(0L, 25000L) ?: 0L
+        val phase = req.query["phase"] ?: "CAPTURE"
+        val querySession = req.query["session_id"]
         val session = deviceSessions[deviceId]
             ?: return 409 to JSONObject().put("error", "no session").toString()
-        val cmd = try { cloud.cloudCommand(session.sessionId, cursor) } catch (_: Exception) { null }
-            ?: return 200 to JSONObject().put("command", "PING").put("cursor", cursor).toString()
+        if (querySession != null && querySession != session.sessionId) {
+            // C01: vínculo sessão/dispositivo — sessão divergente nunca anexa silenciosamente.
+            return 409 to JSONObject().put("error", "session mismatch").toString()
+        }
+        // C01/RA01: RESULT_WAIT consulta resultado integral; CAPTURE consulta comando integral.
+        if (phase == "RESULT_WAIT") {
+            val result = try { cloud.cloudResult(session.sessionId, cursor) } catch (_: Exception) { null }
+                ?: return 204 to ""
+            return 200 to result
+        }
+        val cmd = try { cloud.cloudCommand(session.sessionId, cursor, phase, waitMs) } catch (_: Exception) { null }
+            ?: return 200 to JSONObject().put("command", "NONE").put("cursor", cursor).toString()
         return 200 to JSONObject()
             .put("command", cmd.command)
             .put("cursor", cmd.cursor)
@@ -267,12 +455,85 @@ class EspHttpServer(
 
     private suspend fun deviceResult(req: HttpRequest): Pair<Int, String> {
         val deviceId = req.query["device_id"] ?: ""
+        requireAuth(req, deviceId)?.let { return it }
         val cursor = req.query["cursor"]?.toLongOrNull() ?: 0L
         val session = deviceSessions[deviceId]
             ?: return 409 to JSONObject().put("error", "no session").toString()
+        // C01/RA01: corpo integral do resultado (command/cursor/session/sequence/revision/sha).
         val result = try { cloud.cloudResult(session.sessionId, cursor) } catch (_: Exception) { null }
             ?: return 204 to ""
         return 200 to result
+    }
+
+    private suspend fun deviceHeartbeat(req: HttpRequest): Pair<Int, String> {
+        val json = try { JSONObject(req.bodyAsText()) } catch (_: Exception) {
+            return 400 to JSONObject().put("error", "invalid json").toString()
+        }
+        val deviceId = json.optString("device_id", "")
+        requireAuth(req, deviceId)?.let { return it }
+        val sessionId = json.optString("session_id", "")
+        val state = json.optString("state", "UNKNOWN")
+        val rssi = json.optInt("rssi", 0)
+        val cameraProfile = json.optString("camera_profile", "NONE")
+        if (sessionId.isBlank()) return 422 to JSONObject().put("error", "invalid heartbeat").toString()
+        val ok = try { cloud.cloudHeartbeat(sessionId, deviceId, state, rssi, cameraProfile) } catch (_: Exception) { false }
+        return if (ok) 200 to JSONObject().put("policy_valid", true).toString()
+        else 503 to JSONObject().put("error", "cloud unavailable").toString()
+    }
+
+    private suspend fun deviceFault(req: HttpRequest): Pair<Int, String> {
+        val json = try { JSONObject(req.bodyAsText()) } catch (_: Exception) {
+            return 400 to JSONObject().put("error", "invalid json").toString()
+        }
+        val deviceId = json.optString("device_id", "")
+        requireAuth(req, deviceId)?.let { return it }
+        val code = json.optString("code", "UNKNOWN")
+        val detail = json.optString("detail", "")
+        val cameraProfile = json.optString("camera_profile", "NONE")
+        // Sem rota cloud em INTEGRACAO rev.1: evento local durável (outbox-arquivo, consumidor em C02).
+        val ok = try { cloud.cloudFault(deviceId, code, detail, cameraProfile) } catch (_: Exception) { false }
+        return if (ok) 200 to JSONObject().put("accepted", true).toString()
+        else 500 to JSONObject().put("error", "fault not persisted").toString()
+    }
+
+    private suspend fun deviceRgbSequence(req: HttpRequest): Pair<Int, String> {
+        val deviceId = req.query["device_id"] ?: ""
+        requireAuth(req, deviceId)?.let { return it }
+        val sessionId = req.query["session_id"] ?: ""
+        val sequenceId = req.query["sequence_id"]
+        if (sessionId.isBlank() || sequenceId.isNullOrBlank()) {
+            return 422 to JSONObject().put("error", "invalid rgb-sequence query").toString()
+        }
+        val session = deviceSessions[deviceId]
+        if (session != null && session.sessionId != sessionId) {
+            return 409 to JSONObject().put("error", "session mismatch").toString()
+        }
+        val body = try { cloud.cloudRgbSequence(sessionId, sequenceId) } catch (_: Exception) { null }
+            ?: return 404 to JSONObject().put("error", "sequence not found").toString()
+        return 200 to body
+    }
+
+    private suspend fun deviceRgbEvent(req: HttpRequest): Pair<Int, String> {
+        val json = try { JSONObject(req.bodyAsText()) } catch (_: Exception) {
+            return 400 to JSONObject().put("error", "invalid json").toString()
+        }
+        val deviceId = json.optString("device_id", "")
+        requireAuth(req, deviceId)?.let { return it }
+        val sessionId = json.optString("session_id", "")
+        val sequenceId = json.optString("sequence_id", "")
+        val revision = json.optInt("revision", -1)
+        val event = json.optString("event", "")
+        val nextIndex = json.optInt("next_index", -1)
+        val itemCount = json.optInt("item_count", -1)
+        if (sessionId.isBlank() || sequenceId.isBlank() || revision < 0 || event.isBlank()
+            || nextIndex < 0 || itemCount < 0) {
+            return 422 to JSONObject().put("error", "invalid rgb event").toString()
+        }
+        val ok = try {
+            cloud.cloudRgbEvent(sessionId, sequenceId, revision, event, nextIndex, itemCount, deviceId)
+        } catch (_: Exception) { false }
+        return if (ok) 200 to JSONObject().put("accepted", true).toString()
+        else 503 to JSONObject().put("error", "cloud unavailable").toString()
     }
 
     private fun deviceEvent(req: HttpRequest): Pair<Int, String> {
@@ -281,6 +542,7 @@ class EspHttpServer(
         return try {
             val json = JSONObject(req.bodyAsText())
             val deviceId = json.optString("device_id", "")
+            requireAuth(req, deviceId)?.let { return it }
             if (!isValidEspId(deviceId)) return 422 to JSONObject().put("error", "invalid device").toString()
             val outbox = File(filesDir, "esp_outbox").apply { mkdirs() }
             val name = "evt-${System.currentTimeMillis()}-${(0..9999).random()}.json"

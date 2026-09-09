@@ -504,7 +504,6 @@ async def end_signal(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    settings: SettingsDep,
 ) -> dict[str, Any]:
     session = await uow.session.scalar(
         select(Session)
@@ -616,14 +615,9 @@ async def end_signal(
 
     # Tentativa best-effort de despacho imediato (após intent durável).
     try:
-        temporal_addr = getattr(settings, "TEMPORAL_ADDRESS", "")
-        if temporal_addr:
-            from src.pages_to_audio.capture.dispatcher import dispatch_pending
-
-            await dispatch_pending(uow.session)
-            await uow.session.flush()
-        else:
-            logger.info("workflow_dispatch_skipped_no_temporal", session_id=session_id)
+        # The post-commit worker owns dispatch; this request never dispatches
+        # against its still-open transaction.
+        pass
     except Exception as exc:
         # Intent permanece PENDING para retry observável pelo dispatcher.
         logger.warning("workflow_dispatch_failed_pending", error=str(exc), session_id=session_id)

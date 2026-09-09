@@ -12,11 +12,18 @@ import androidx.core.app.NotificationCompat
 import com.pagestoaudio.gateway.GatewayApplication
 import com.pagestoaudio.gateway.R
 import com.pagestoaudio.gateway.domain.SessionRepository
+import com.pagestoaudio.gateway.diag.CameraDiagnosticsForwarder
+import com.pagestoaudio.gateway.diag.DiagCloudApi
 import com.pagestoaudio.gateway.spool.PendingFrame
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.charset.StandardCharsets
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -53,14 +60,30 @@ class EspBridgeService : Service() {
         createChannel()
         startForeground(NOTIF_ID, buildNotification("Ponte ESP pronta"))
         val app = application as GatewayApplication
+        if (!com.pagestoaudio.gateway.BuildConfig.DEBUG) {
+            // EspHttpServer is the isolated-bench HTTP transport today.  A
+            // release build must not expose device secrets or JPEGs over
+            // plaintext; TLS transport is a prerequisite for production.
+            Log.e(TAG, "Ponte ESP recusada: transporte local HTTP sem TLS em release")
+            stopSelf()
+            return
+        }
         val provisioning = EspProvisioning(this)
         discovery = EspDiscoveryResponder(provisioning, scope).also { it.start() }
         val bridge = object : EspHttpServer.EspCloudBridge {
-            override suspend fun startForDevice(deviceId: String, resumeHint: Boolean, lastSessionId: String?): EspHttpServer.CloudSession {
+            override suspend fun startForDevice(
+                deviceId: String,
+                resumeHint: Boolean,
+                lastSessionId: String?,
+                allowNewSession: Boolean,
+            ): EspHttpServer.CloudSession {
                 val res = app.sessionRepository.startSession(
-                    allowNewSession = !resumeHint,
+                    allowNewSession = allowNewSession,
                     resumeHint = lastSessionId,
-                    lastSessionId = lastSessionId
+                    lastSessionId = lastSessionId,
+                    deviceCodeOverride = deviceId,
+                    captureSourceOverride = "ESP32_CAMERA",
+                    gatewayCodeOverride = provisioning.gatewayId(),
                 )
                 val success = res as? SessionRepository.SessionResult.Success
                     ?: throw IllegalStateException("cloud start failed: $res")
@@ -81,22 +104,141 @@ class EspBridgeService : Service() {
                 return app.sessionRepository.captureComplete(sessionId, captureId, frames).isSuccess
             }
 
-            override suspend fun cloudCommand(sessionId: String, cursor: Long): EspHttpServer.CloudCommand? {
-                val res = app.sessionRepository.fetchCommand(sessionId, cursor, waitMs = 0, phase = "CAPTURE")
+            override suspend fun cloudCommand(
+                sessionId: String,
+                cursor: Long,
+                phase: String,
+                waitMs: Long,
+            ): EspHttpServer.CloudCommand? {
+                val res = app.sessionRepository.fetchCommand(sessionId, cursor, waitMs, phase)
                 val cmd = res.getOrNull() ?: return null
-                return EspHttpServer.CloudCommand(cmd.command, cmd.cursor, "{}")
+                val payload = JSONObject()
+                    .put("session_id", cmd.sessionId)
+                    .put("capture_id", cmd.captureId)
+                    .put("frames", cmd.frames)
+                    .put("gap_ms", cmd.gapMs)
+                    .put("frame_size", cmd.frameSize)
+                    .put("jpeg_quality", cmd.jpegQuality)
+                return EspHttpServer.CloudCommand(cmd.command, cmd.cursor, payload.toString())
             }
 
             override suspend fun cloudResult(sessionId: String, cursor: Long): String? {
                 val res = app.sessionRepository.fetchResult(sessionId, cursor)
                 val body = res.getOrNull() ?: return null
                 return org.json.JSONObject()
-                    .put("command", body?.command)
-                    .put("cursor", body?.cursor)
+                    .put("command", body.command)
+                    .put("cursor", body.cursor)
+                    .put("session_id", body.sessionId)
+                    .put("sequence_id", body.sequenceId)
+                    .put("revision", body.revision)
+                    .put("item_count", body.itemCount)
+                    .put("sha256", body.sha256)
                     .toString()
             }
+
+            override suspend fun cloudHeartbeat(
+                sessionId: String,
+                deviceId: String,
+                state: String,
+                rssi: Int,
+                cameraProfile: String,
+            ): Boolean = app.sessionRepository
+                .heartbeat(sessionId, phase = state, deviceIdOverride = deviceId)
+                .isSuccess
+
+            override suspend fun cloudFault(
+                deviceId: String,
+                code: String,
+                detail: String,
+                cameraProfile: String,
+            ): Boolean {
+                val dir = File(filesDir, "esp_outbox").apply { mkdirs() }
+                val target = File(dir, "fault-${System.currentTimeMillis()}-${deviceId}.json")
+                val temp = File(dir, ".${target.name}.tmp")
+                return try {
+                    FileOutputStream(temp).use { output ->
+                        val body = JSONObject()
+                            .put("device_id", deviceId)
+                            .put("code", code)
+                            .put("detail", detail)
+                            .put("camera_profile", cameraProfile)
+                            .put("created_at", System.currentTimeMillis())
+                            .toString()
+                            .toByteArray(StandardCharsets.UTF_8)
+                        output.write(body)
+                        output.fd.sync()
+                    }
+                    temp.renameTo(target)
+                } finally {
+                    if (temp.exists()) temp.delete()
+                }
+            }
+
+            override suspend fun cloudRgbSequence(sessionId: String, sequenceId: String?): String? {
+                val id = sequenceId ?: return null
+                val body = app.sessionRepository.fetchRgbSequence(sessionId, id).getOrNull() ?: return null
+                return JSONObject()
+                    .put("schema_version", body.schemaVersion)
+                    .put("session_id", body.sessionId)
+                    .put("sequence_id", body.sequenceId)
+                    .put("revision", body.revision)
+                    .put("answers", body.answers)
+                    .put("sha256", body.sha256)
+                    .put("item_count", body.itemCount)
+                    .put("palette", body.palette)
+                    .toString()
+            }
+
+            override suspend fun cloudRgbEvent(
+                sessionId: String,
+                sequenceId: String,
+                revision: Int,
+                event: String,
+                nextIndex: Int,
+                itemCount: Int,
+                deviceId: String,
+            ): Boolean = app.sessionRepository.postRgbEvent(
+                sessionId, sequenceId, revision, event, nextIndex, itemCount, deviceId
+            ).isSuccess
         }
-        server = EspHttpServer(provisioning, app.spoolRepository, filesDir, scope, cloud = bridge).also { it.start() }
+        val diagCloud = DiagCloudApi(
+            baseUrl = app.config.baseUrl,
+            gatewayId = app.config.gatewayId ?: app.config.deviceId,
+            bearer = { app.config.gatewaySecret ?: app.config.deviceSecret ?: "" },
+            client = app.okHttpClient,
+        )
+        val diagForwarder = CameraDiagnosticsForwarder(
+            spool = app.spoolRepository,
+            filesDir = filesDir,
+            scope = scope,
+            cloud = diagCloud,
+        )
+        server = EspHttpServer(provisioning, app.spoolRepository, filesDir, scope, cloud = bridge).also {
+            it.diagForwarder = diagForwarder
+            it.start()
+        }
+        scope.launch {
+            val recovered = diagForwarder.recoverDurable()
+            if (recovered > 0) Log.i(TAG, "diagnostics recovered=$recovered")
+        }
+        scope.launch {
+            // Cloud-created diagnostics are claimed by the gateway and exposed
+            // to the ESP's local poll endpoint.  No CameraX fallback is used.
+            while (isActive) {
+                if (com.pagestoaudio.gateway.diag.DiagConfig.diagnosticsEnabled && app.config.isProvisioned) {
+                    provisioning.listDevices().forEach { deviceId ->
+                        try {
+                            diagCloud.pending(deviceId).forEach { request ->
+                                diagForwarder.start(request)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "diagnostic pending poll falhou", e)
+                        }
+                    }
+                }
+                kotlinx.coroutines.delay(10_000L)
+            }
+        }
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PagesToAudio:EspBridge").apply {
                 try { acquire(10 * 60 * 60 * 1000L) } catch (_: Exception) {}

@@ -146,6 +146,11 @@ class AppSettings(BaseSettings):
     RERANKER_ENABLED: bool = False
     STATUS_AUDIO_ENABLED: bool = True
     WEB_SEARCH_ENABLED: bool = True
+    # D00/D10 — diagnóstico de câmera (foto/prévia/clipe), desligado por padrão.
+    CAMERA_DIAGNOSTICS_ENABLED: bool = False
+    CAMERA_DIAGNOSTICS_BUCKET: str = ""
+    CAMERA_DIAGNOSTICS_MAX_PHOTO_BYTES: int = 2 * 1024 * 1024
+    CAMERA_DIAGNOSTICS_MAX_ROUND_BYTES: int = 20 * 1024 * 1024
 
     # Firmware V2.2 RGB result channel
     RGB_RESULTS_ENABLED: bool = True

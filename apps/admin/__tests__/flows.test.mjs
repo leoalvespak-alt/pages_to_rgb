@@ -70,3 +70,20 @@ describe("S07.1 mínimo RGB não sugere parcial", () => {
     );
   });
 });
+
+describe("D04/D05 página de teste de câmera", () => {
+  it("prévia com polling controlado, stale e sem binário em JSON", () => {
+    const camSrc = readFileSync(
+      join(root, "app", "(admin)", "admin", "camera-test", "page.tsx"),
+      "utf8"
+    );
+    assert.ok(camSrc.includes("500"), "metadados ~500 ms");
+    assert.ok(camSrc.includes("pending"), "sem sobreposição de requests");
+    assert.ok(camSrc.toLowerCase().includes("imagem desatualizada"), "sinaliza stale após 5 s");
+    assert.ok(camSrc.includes("latest.jpg"), "JPEG como imagem, nunca base64 em JSON");
+    assert.ok(!camSrc.includes("data:image"), "sem binário embutido em JSON");
+    assert.ok(camSrc.includes("visibilitychange"), "aba oculta para polling/STOP");
+    assert.ok(camSrc.includes("playsInline"), "player nativo sem áudio forçado");
+    assert.ok(camSrc.includes("Download original"), "download do original");
+  });
+});

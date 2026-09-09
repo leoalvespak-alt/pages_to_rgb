@@ -10,9 +10,11 @@ from fastapi.responses import JSONResponse
 from apps.api.middleware.request_context import RequestContextMiddleware
 from apps.api.routers import API_V1_PREFIX
 from apps.api.routers.admin_auth import router as admin_auth_router
+from apps.api.routers.admin_camera_diagnostics import router as admin_camera_diagnostics_router
 from apps.api.routers.admin_sessions import router as admin_sessions_router
 from apps.api.routers.admin_settings import router as admin_settings_router
 from apps.api.routers.gateway import router as gateway_router
+from apps.api.routers.gateway_diagnostics import router as gateway_diagnostics_router
 from apps.api.routers.gateway_rgb import router as gateway_rgb_router
 from apps.api.routers.handwritten import router as handwritten_router
 from apps.api.routers.health import router as health_router
@@ -57,7 +59,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_auth_router, prefix=API_V1_PREFIX)
     app.include_router(admin_settings_router, prefix=API_V1_PREFIX)
     app.include_router(admin_sessions_router, prefix=API_V1_PREFIX)
+    app.include_router(admin_camera_diagnostics_router, prefix=API_V1_PREFIX)
     app.include_router(gateway_router, prefix=API_V1_PREFIX)
+    app.include_router(gateway_diagnostics_router, prefix=API_V1_PREFIX)
     app.include_router(gateway_rgb_router, prefix=API_V1_PREFIX)
     app.include_router(handwritten_router, prefix=API_V1_PREFIX)
     app.include_router(knowledge_router, prefix=API_V1_PREFIX)

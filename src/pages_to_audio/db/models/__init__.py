@@ -2,6 +2,7 @@ from src.pages_to_audio.db.models.admin_settings import AdminSettings
 from src.pages_to_audio.db.models.answer_attempt import AnswerAttempt
 from src.pages_to_audio.db.models.audio_artifact import AudioArtifact
 from src.pages_to_audio.db.models.audit_event import AuditEvent
+from src.pages_to_audio.db.models.camera_diagnostic import CameraDiagnostic, CameraDiagnosticFrame
 from src.pages_to_audio.db.models.capture import Capture
 from src.pages_to_audio.db.models.device import Device
 from src.pages_to_audio.db.models.final_answer import FinalAnswer
@@ -31,6 +32,8 @@ __all__ = [
     "AnswerAttempt",
     "AudioArtifact",
     "AuditEvent",
+    "CameraDiagnostic",
+    "CameraDiagnosticFrame",
     "Capture",
     "Device",
     "FinalAnswer",

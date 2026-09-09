@@ -32,7 +32,12 @@ class EspProvisioning(context: Context) {
         return id!!
     }
 
-    /** Segredo do dispositivo (criado uma vez, estável). */
+    /** Segredo do dispositivo (criado uma vez, estável).
+     *
+     * C01: USO EXCLUSIVO do fluxo explícito de pareamento (tela do app).
+     * NUNCA chamar a partir de rota HTTP não autenticada: nenhuma rota
+     * protegida pode criar credencial por pedido não autenticado (RA02).
+     */
     fun getOrCreateDeviceSecret(deviceId: String): String {
         val key = "dev_secret_$deviceId"
         var secret = prefs.getString(key, null)
@@ -57,4 +62,27 @@ class EspProvisioning(context: Context) {
 
     fun isDeviceProvisioned(deviceId: String): Boolean =
         !prefs.getString("dev_secret_$deviceId", null).isNullOrBlank()
+
+    /**
+     * C01 — pareamento explícito: o operador digita na tela do app o mesmo
+     * segredo compilado no firmware (`P2A_DEVICE_SECRET` em private_config.h).
+     * É a única forma de criar credencial; rotas HTTP nunca criam.
+     */
+    fun importDeviceSecret(deviceId: String, secret: String): Boolean {
+        if (!deviceId.matches(Regex("^[A-Za-z0-9_-]{1,63}$"))) return false
+        if (secret.length < 16 || secret.length > 256) return false
+        prefs.edit().putString("dev_secret_$deviceId", secret).apply()
+        return true
+    }
+
+    /** Remove pareamento (revogação local imediata). */
+    fun removeDevice(deviceId: String) {
+        prefs.edit().remove("dev_secret_$deviceId").apply()
+    }
+
+    /** Dispositivos pareados (para a tela de pareamento; sem expor segredos). */
+    fun listDevices(): List<String> =
+        prefs.all.keys.mapNotNull { k ->
+            if (k.startsWith("dev_secret_")) k.removePrefix("dev_secret_") else null
+        }.sorted()
 }

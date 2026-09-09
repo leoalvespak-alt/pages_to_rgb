@@ -5,6 +5,7 @@ import com.pagestoaudio.gateway.network.ApiService
 import com.pagestoaudio.gateway.network.EndSignalRequest
 import com.pagestoaudio.gateway.network.HandwrittenStartRequest
 import com.pagestoaudio.gateway.network.HeartbeatRequest
+import com.pagestoaudio.gateway.network.RgbEventRequest
 import com.pagestoaudio.gateway.network.StartSessionRequest
 import com.pagestoaudio.gateway.spool.SessionHistoryDao
 import com.pagestoaudio.gateway.spool.SessionHistoryEntity
@@ -42,15 +43,18 @@ class SessionRepository(
     suspend fun startSession(
         allowNewSession: Boolean = true,
         resumeHint: String? = null,
-        lastSessionId: String? = null
+        lastSessionId: String? = null,
+        deviceCodeOverride: String = deviceId,
+        captureSourceOverride: String = "ANDROID_CAMERA",
+        gatewayCodeOverride: String? = deviceId,
     ): SessionResult = withContext(Dispatchers.IO) {
         try {
             val req = StartSessionRequest(
-                deviceCode = deviceId,
-                captureSource = "ANDROID_CAMERA",
+                deviceCode = deviceCodeOverride,
+                captureSource = captureSourceOverride,
                 allowNewSession = allowNewSession,
                 resumeHint = resumeHint,
-                gatewayCode = deviceId,
+                gatewayCode = gatewayCodeOverride,
                 lastSessionId = lastSessionId
             )
             val resp = api.startSession(req)
@@ -106,10 +110,15 @@ class SessionRepository(
         }
     }
 
-    suspend fun heartbeat(sessionId: String, phase: String = "CAPTURE", cursor: Long = 0): Result<Unit> =
+    suspend fun heartbeat(
+        sessionId: String,
+        phase: String = "CAPTURE",
+        cursor: Long = 0,
+        deviceIdOverride: String = deviceId,
+    ): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                val resp = api.heartbeat(sessionId, HeartbeatRequest(deviceId, phase, cursor))
+                val resp = api.heartbeat(sessionId, HeartbeatRequest(deviceIdOverride, phase, cursor))
                 if (resp.isSuccessful) {
                     Log.d(TAG, "heartbeat ok session=$sessionId phase=$phase")
                     Result.success(Unit)
@@ -203,9 +212,13 @@ class SessionRepository(
             }
         }
 
-    suspend fun fetchResult(sessionId: String, cursor: Long = 0) = withContext(Dispatchers.IO) {
+    suspend fun fetchResult(
+        sessionId: String,
+        cursor: Long = 0,
+        deviceIdOverride: String = deviceId,
+    ) = withContext(Dispatchers.IO) {
         try {
-            val resp = api.getResult(sessionId, deviceId, cursor)
+            val resp = api.getResult(sessionId, deviceIdOverride, cursor)
             if (resp.isSuccessful) Result.success(resp.body())
             else Result.failure(IllegalStateException("getResult ${resp.code()}"))
         } catch (e: Exception) {
@@ -230,6 +243,49 @@ class SessionRepository(
             val resp = api.getRgbTest(sessionId, afterId)
             if (resp.isSuccessful) Result.success(resp.body())
             else Result.failure(IllegalStateException("getRgbTest ${resp.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchRgbSequence(
+        sessionId: String,
+        sequenceId: String,
+        deviceIdOverride: String = deviceId,
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val resp = api.getRgbSequence(sessionId, deviceIdOverride, sequenceId)
+            if (resp.isSuccessful) Result.success(resp.body())
+            else Result.failure(IllegalStateException("getRgbSequence ${resp.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun postRgbEvent(
+        sessionId: String,
+        sequenceId: String,
+        revision: Int,
+        event: String,
+        nextIndex: Int,
+        itemCount: Int,
+        deviceIdOverride: String = deviceId,
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val resp = api.postRgbEvent(
+                sessionId,
+                RgbEventRequest(
+                    deviceId = deviceIdOverride,
+                    sessionId = sessionId,
+                    sequenceId = sequenceId,
+                    revision = revision,
+                    event = event,
+                    nextIndex = nextIndex,
+                    itemCount = itemCount,
+                ),
+            )
+            if (resp.isSuccessful) Result.success(resp.body())
+            else Result.failure(IllegalStateException("postRgbEvent ${resp.code()}"))
         } catch (e: Exception) {
             Result.failure(e)
         }
