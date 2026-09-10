@@ -13,12 +13,24 @@ from apps.api.routers.admin_auth import router as admin_auth_router
 from apps.api.routers.admin_camera_diagnostics import router as admin_camera_diagnostics_router
 from apps.api.routers.admin_sessions import router as admin_sessions_router
 from apps.api.routers.admin_settings import router as admin_settings_router
+from apps.api.routers.camera_profiles import (
+    admin_router as admin_camera_profiles_router,
+)
+from apps.api.routers.camera_profiles import (
+    gateway_router as gateway_camera_profiles_router,
+)
 from apps.api.routers.gateway import router as gateway_router
 from apps.api.routers.gateway_diagnostics import router as gateway_diagnostics_router
 from apps.api.routers.gateway_rgb import router as gateway_rgb_router
 from apps.api.routers.handwritten import router as handwritten_router
 from apps.api.routers.health import router as health_router
 from apps.api.routers.knowledge import router as knowledge_router
+from apps.api.routers.rgb_device_commands import (
+    admin_router as admin_rgb_device_commands_router,
+)
+from apps.api.routers.rgb_device_commands import (
+    gateway_router as gateway_rgb_device_commands_router,
+)
 from src.pages_to_audio.common.errors import AppError
 from src.pages_to_audio.config.settings import get_settings
 from src.pages_to_audio.observability.logging import configure_logging, get_logger
@@ -60,9 +72,13 @@ def create_app() -> FastAPI:
     app.include_router(admin_settings_router, prefix=API_V1_PREFIX)
     app.include_router(admin_sessions_router, prefix=API_V1_PREFIX)
     app.include_router(admin_camera_diagnostics_router, prefix=API_V1_PREFIX)
+    app.include_router(admin_camera_profiles_router, prefix=API_V1_PREFIX)
     app.include_router(gateway_router, prefix=API_V1_PREFIX)
+    app.include_router(gateway_camera_profiles_router, prefix=API_V1_PREFIX)
     app.include_router(gateway_diagnostics_router, prefix=API_V1_PREFIX)
     app.include_router(gateway_rgb_router, prefix=API_V1_PREFIX)
+    app.include_router(admin_rgb_device_commands_router, prefix=API_V1_PREFIX)
+    app.include_router(gateway_rgb_device_commands_router, prefix=API_V1_PREFIX)
     app.include_router(handwritten_router, prefix=API_V1_PREFIX)
     app.include_router(knowledge_router, prefix=API_V1_PREFIX)
 

@@ -6,8 +6,10 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import com.pagestoaudio.gateway.network.ApiService
+import com.pagestoaudio.gateway.network.CameraCapabilitiesV1
 import com.pagestoaudio.gateway.network.CaptureCompleteResponse
 import com.pagestoaudio.gateway.network.CapturePolicyResponse
+import com.pagestoaudio.gateway.network.CommandAckRequest
 import com.pagestoaudio.gateway.network.CommandResponse
 import com.pagestoaudio.gateway.network.EndSignalRequest
 import com.pagestoaudio.gateway.network.EndSignalResponse
@@ -21,6 +23,9 @@ import com.pagestoaudio.gateway.network.HelloRequest
 import com.pagestoaudio.gateway.network.HelloResponse
 import com.pagestoaudio.gateway.network.RgbEventRequest
 import com.pagestoaudio.gateway.network.RgbEventResponse
+import com.pagestoaudio.gateway.network.RgbDeviceCommandPage
+import com.pagestoaudio.gateway.network.RgbDeviceCommandResponse
+import com.pagestoaudio.gateway.network.RgbDeviceEventRequest
 import com.pagestoaudio.gateway.network.RgbSequenceResponse
 import com.pagestoaudio.gateway.network.RgbTestCommandResponse
 import com.pagestoaudio.gateway.network.SessionResultResponse
@@ -73,7 +78,9 @@ class UploadWorkerTest {
         var lastUploadCall: Triple<String, String, Int>? = null
         override suspend fun hello(body: HelloRequest): Response<HelloResponse> = throw NotImplementedError()
         override suspend fun startSession(body: StartSessionRequest): Response<StartSessionResponse> = throw NotImplementedError()
+        override suspend fun getCameraCapabilities(deviceCode: String, advertisedVersion: String?): Response<CameraCapabilitiesV1> = throw NotImplementedError()
         override suspend fun heartbeat(sessionId: String, body: HeartbeatRequest?): Response<HeartbeatResponse> = throw NotImplementedError()
+        override suspend fun ackCommand(sessionId: String, body: CommandAckRequest): Response<Unit> = throw NotImplementedError()
         override suspend fun getPolicy(sessionId: String): Response<CapturePolicyResponse> = throw NotImplementedError()
         override suspend fun getCommand(sessionId: String, cursor: Long, waitMs: Long, phase: String): Response<CommandResponse> = throw NotImplementedError()
         override suspend fun uploadFrame(sessionId: String, captureId: String, frameIndex: Int, sha256: String, resolution: String, receivedAt: String, orientation: Int, file: MultipartBody.Part): Response<FrameUploadResponse> {
@@ -87,6 +94,8 @@ class UploadWorkerTest {
         override suspend fun getRgbSequence(sessionId: String, deviceId: String, sequenceId: String?): Response<RgbSequenceResponse> = throw NotImplementedError()
         override suspend fun getRgbTest(sessionId: String, afterId: Int): Response<RgbTestCommandResponse?> = throw NotImplementedError()
         override suspend fun postRgbEvent(sessionId: String, body: RgbEventRequest): Response<RgbEventResponse> = throw NotImplementedError()
+        override suspend fun getDeviceRgbCommands(deviceId: String, after: Long): Response<RgbDeviceCommandPage> = throw NotImplementedError()
+        override suspend fun postDeviceRgbEvent(deviceId: String, commandId: String, idempotencyKey: String, body: RgbDeviceEventRequest): Response<RgbDeviceCommandResponse> = throw NotImplementedError()
         override suspend fun startHandwrittenSession(body: HandwrittenStartRequest): Response<HandwrittenStartResponse> = throw NotImplementedError()
         override suspend fun uploadHandwrittenFrame(sessionId: String, captureId: String, frameIndex: Int, sha256: String, resolution: String, receivedAt: String, orientation: Int, file: MultipartBody.Part): Response<FrameUploadResponse> = throw NotImplementedError()
         override suspend fun captureCompleteHandwritten(sessionId: String, captureId: String, receivedFrames: Int): Response<CaptureCompleteResponse> = throw NotImplementedError()

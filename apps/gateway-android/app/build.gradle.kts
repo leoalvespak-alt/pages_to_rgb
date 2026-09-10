@@ -9,6 +9,17 @@ android {
     namespace = "com.pagestoaudio.gateway"
     compileSdk = 34
 
+    val releaseKeystorePath = System.getenv("P2A_RELEASE_KEYSTORE")
+    val releaseStorePassword = System.getenv("P2A_RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("P2A_RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("P2A_RELEASE_KEY_PASSWORD")
+    val releaseSigningConfigured = listOf(
+        releaseKeystorePath,
+        releaseStorePassword,
+        releaseKeyAlias,
+        releaseKeyPassword,
+    ).all { !it.isNullOrBlank() }
+
     defaultConfig {
         applicationId = "com.pagestoaudio.gateway"
         minSdk = 26
@@ -24,6 +35,20 @@ android {
 
     buildTypes {
         release {
+            check(releaseSigningConfigured) {
+                "Release signing requires P2A_RELEASE_KEYSTORE, " +
+                    "P2A_RELEASE_STORE_PASSWORD, P2A_RELEASE_KEY_ALIAS, and " +
+                    "P2A_RELEASE_KEY_PASSWORD"
+            }
+            check(file(requireNotNull(releaseKeystorePath)).isFile) {
+                "Release keystore does not exist: $releaseKeystorePath"
+            }
+            signingConfig = signingConfigs.create("release") {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

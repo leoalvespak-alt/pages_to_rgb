@@ -17,6 +17,7 @@ import com.pagestoaudio.gateway.camera.PhoneCameraCaptureSource
 import com.pagestoaudio.gateway.camera.SessionAwareCaptureSource
 import com.pagestoaudio.gateway.domain.SessionRepository
 import java.io.File
+import java.net.SocketTimeoutException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,6 +46,7 @@ data class SessionUiState(
     val lastFrameLabel: String? = null,
     val lastFrameAck: Boolean = false,
     val serverCommand: String = "—",
+    val camera: CameraUiState = CameraUiState(),
     val rgbTest: RgbTestUi? = null,
     val logs: List<String> = emptyList(),
     val errorMessage: String? = null
@@ -58,7 +60,8 @@ data class RgbTestUi(
     val brightnessPercent: Int,
     val onMs: Long,
     val offMs: Long,
-    val active: Boolean = true
+    val active: Boolean = true,
+    val status: String = "RECEIVED",
 )
 
 class SessionViewModel(
@@ -147,6 +150,106 @@ class SessionViewModel(
         }
     }
 
+    fun setCameraMode(mode: String) {
+        val normalized = if (mode == "PHOTO") "PHOTO" else "OCR"
+        _uiState.update { it.copy(camera = it.camera.copy(mode = normalized), errorMessage = null) }
+        log("Modo de camera solicitado: $normalized")
+    }
+
+    fun setCameraResolution(resolution: String) {
+        if (resolution !in setOf("QVGA", "VGA", "SVGA", "XGA", "SXGA", "UXGA")) return
+        _uiState.update { it.copy(camera = it.camera.copy(requestedResolution = resolution), errorMessage = null) }
+    }
+
+    fun setCameraJpegQuality(quality: Int) {
+        _uiState.update { it.copy(camera = it.camera.copy(requestedJpegQuality = quality.coerceIn(8, 12))) }
+    }
+
+    fun setCameraTuning(name: String, value: Int) {
+        val adjusted = value.coerceIn(-2, 2)
+        _uiState.update { state ->
+            state.copy(camera = when (name) {
+                "brightness" -> state.camera.copy(brightness = adjusted)
+                "contrast" -> state.camera.copy(contrast = adjusted)
+                "saturation" -> state.camera.copy(saturation = adjusted)
+                else -> state.camera
+            })
+        }
+    }
+
+    fun setCameraToggle(name: String, enabled: Boolean) {
+        _uiState.update { state ->
+            val camera = state.camera
+            if (camera.unavailable.containsKey(name)) return@update state
+            state.copy(camera = when (name) {
+                "awb" -> camera.copy(awb = enabled)
+                "awb_gain" -> camera.copy(awbGain = enabled)
+                "aec" -> camera.copy(aec = enabled)
+                "agc" -> camera.copy(agc = enabled)
+                "bpc" -> camera.copy(bpc = enabled)
+                "wpc" -> camera.copy(wpc = enabled)
+                "raw_gamma" -> camera.copy(rawGamma = enabled)
+                "lens_correction" -> camera.copy(lensCorrection = enabled)
+                "dcw" -> camera.copy(dcw = enabled)
+                "hmirror" -> camera.copy(hmirror = enabled)
+                "vflip" -> camera.copy(vflip = enabled)
+                "colorbar" -> camera.copy(colorbar = enabled)
+                else -> camera
+            })
+        }
+    }
+
+    fun toggleCameraAdvanced() {
+        _uiState.update { it.copy(camera = it.camera.copy(advancedExpanded = !it.camera.advancedExpanded)) }
+    }
+
+    /** Errors are rendered as OFFLINE/TIMEOUT and never converted into fake support. */
+    fun refreshCameraCapabilities() {
+        _uiState.update {
+            it.copy(camera = it.camera.copy(
+                capabilityStatus = "CHECKING",
+                capabilityMessage = "Consultando capabilities do Gateway...",
+            ))
+        }
+        viewModelScope.launch {
+            val result = sessionRepository.cameraCapabilities(advertisedVersion = "v2")
+            val capabilities = result.getOrNull()
+            if (capabilities != null) {
+                _uiState.update {
+                    it.copy(camera = it.camera.copy(
+                        capabilityStatus = if (capabilities.compatible) "ONLINE" else "INCOMPATIBLE",
+                        capabilityMessage = capabilities.message.ifBlank {
+                            if (capabilities.compatible) "Capabilities compativeis." else "Firmware incompativel com camera v2."
+                        },
+                        unavailable = capabilities.unavailable,
+                        firmwareVersion = capabilities.firmwareVersion,
+                        capabilitiesVersion = capabilities.version,
+                    ))
+                }
+            } else {
+                val error = result.exceptionOrNull()
+                val timedOut = error is SocketTimeoutException || error?.cause is SocketTimeoutException
+                _uiState.update {
+                    it.copy(camera = it.camera.copy(
+                        capabilityStatus = if (timedOut) "TIMEOUT" else "OFFLINE",
+                        capabilityMessage = if (timedOut) {
+                            "Timeout ao consultar capabilities; controles nao sao enviados."
+                        } else {
+                            "Gateway offline; controles nao sao enviados."
+                        },
+                    ))
+                }
+            }
+        }
+    }
+
+    /** Stops only the local preview; APPLIED/OFF from the ESP remains the physical confirmation. */
+    fun stopRgbTest() {
+        val current = _uiState.value.rgbTest ?: return
+        _uiState.update { it.copy(rgbTest = current.copy(active = false, status = "OFF")) }
+        log("STOP visual local solicitado; confirmacao fisica depende de OFF da ESP")
+    }
+
     fun selectCaptureSource(label: String) {
         // HANDWRITTEN_WORD só permite Android
         if (_uiState.value.sessionType == "HANDWRITTEN_WORD" && label == "ESP32") {
@@ -223,8 +326,13 @@ class SessionViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isStartingSession = true, errorMessage = null) }
             val st = _uiState.value.sessionType
+            val camera = _uiState.value.camera
             log("Iniciando sessão $st …")
-            val result = if (st == "HANDWRITTEN_WORD") sessionRepository.startHandwrittenSession() else sessionRepository.startSession(allowNewSession = true)
+            val result = if (st == "HANDWRITTEN_WORD") sessionRepository.startHandwrittenSession() else sessionRepository.startSession(
+                allowNewSession = true,
+                cameraMode = camera.mode,
+                cameraCapabilitiesVersion = "v2",
+            )
             when (result) {
                 is SessionRepository.SessionResult.Success -> {
                     val s = result.state
@@ -236,7 +344,16 @@ class SessionViewModel(
                             isCapturing = true,
                             isStartingSession = false,
                             serverCommand = "CAPTURING",
-                            pageCount = 0
+                            pageCount = 0,
+                            camera = it.camera.copy(
+                                capabilityStatus = "ONLINE",
+                                capabilityMessage = "Snapshot da sessão recebido; efetivo confirmado pelo backend.",
+                                effectiveResolution = s.effectiveCameraConfig?.frameSize,
+                                effectiveJpegQuality = s.effectiveCameraConfig?.androidJpegQualityPercent
+                                    ?: s.effectiveCameraConfig?.espJpegQuality,
+                                firmwareVersion = s.firmwareVersion,
+                                capabilitiesVersion = s.capabilitiesVersion,
+                            ),
                         )
                     }
                     log("Sessão iniciada: ${s.sessionId} resumed=${s.resumed}")
@@ -531,12 +648,13 @@ class SessionViewModel(
                         brightnessPercent = command.brightnessPercent.coerceIn(0, 100),
                         onMs = command.onMs,
                         offMs = command.offMs,
-                        active = true
+                        active = true,
+                        status = "RECEIVED",
                     )
                     _uiState.update { it.copy(rgbTest = item) }
                     log("RGB TEST #${item.commandId}: ${item.red},${item.green},${item.blue} brilho=${item.brightnessPercent}% on=${item.onMs}ms")
                     delay(item.onMs)
-                    _uiState.update { state -> state.copy(rgbTest = item.copy(active = false)) }
+                    _uiState.update { state -> state.copy(rgbTest = item.copy(active = false, status = "OFF")) }
                     delay(item.offMs)
                     _uiState.update { state -> state.copy(rgbTest = null) }
                 } else {

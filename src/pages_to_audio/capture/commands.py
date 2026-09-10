@@ -25,7 +25,13 @@ from src.pages_to_audio.domain.enums.session_state import SessionState
 CONTROL_COMMANDS = {"STOP", "RESUME", "PAUSE"}
 
 
-def _desired_command(state: SessionState, *, phase: str | None) -> tuple[str, dict | None]:
+def _desired_command(
+    state: SessionState,
+    *,
+    phase: str | None,
+    capture_source: str = "ANDROID_CAMERA",
+    camera_config: dict | None = None,
+) -> tuple[str, dict | None]:
     norm = (phase or "").strip().upper()
     if state in {SessionState.LOCKED, SessionState.CAPTURE_LOCKING} or state.is_terminal:
         return "STOP", None
@@ -34,6 +40,21 @@ def _desired_command(state: SessionState, *, phase: str | None) -> tuple[str, di
     # Controle explícito tem prioridade e nunca é bloqueado pela pausa.
     if norm in {"PAUSE", "RESUME", "STOP"}:
         return norm, None
+    if capture_source == "ESP32_CAMERA":
+        config = camera_config or {}
+        if norm == "PROBE":
+            return "CAPTURE_PROBE", {
+                "frames": 1,
+                "gap_ms": 0,
+                "frame_size": "UXGA",
+                "jpeg_quality": 10,
+            }
+        return "CAPTURE_FULL", {
+            "frames": int(config.get("frame_count") or 2),
+            "gap_ms": int(config.get("intra_frame_gap_ms") or 220),
+            "frame_size": str(config.get("frame_size") or "UXGA"),
+            "jpeg_quality": int(config.get("esp_jpeg_quality") or 10),
+        }
     if norm == "PROBE":
         return "CAPTURE_PROBE", {
             "frames": 1,
@@ -61,7 +82,14 @@ async def next_persistent_command(
     if client_cursor < 0 or client_cursor > MAX_EXACT_CURSOR:
         raise ValueError("cursor fora do intervalo exato 0..2^53-1")
     state = SessionState(session.status)
-    command, payload = _desired_command(state, phase=phase)
+    capture_source = getattr(session, "capture_source", "ANDROID_CAMERA")
+    camera_config = getattr(session, "effective_camera_config_json", None)
+    command, payload = _desired_command(
+        state,
+        phase=phase,
+        capture_source=capture_source,
+        camera_config=camera_config,
+    )
     # Long-poll cooperativo apenas para comandos de captura (não controle).
     if wait_ms > 0 and command not in CONTROL_COMMANDS and command != "STOP":
         deadline = min(int(wait_ms), 25000) / 1000.0
@@ -76,7 +104,12 @@ async def next_persistent_command(
                 cur_state = SessionState(session.status)
             except ValueError:
                 break
-            new_command, _ = _desired_command(cur_state, phase=phase)
+            new_command, _ = _desired_command(
+                cur_state,
+                phase=phase,
+                capture_source=capture_source,
+                camera_config=camera_config,
+            )
             if new_command in CONTROL_COMMANDS or new_command == "STOP":
                 command, payload = new_command, None
                 break

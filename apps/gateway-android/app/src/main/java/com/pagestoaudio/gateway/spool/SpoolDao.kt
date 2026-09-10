@@ -28,6 +28,13 @@ interface SpoolDao {
     @Query("SELECT COUNT(*) FROM pending_frames WHERE ack = 0")
     suspend fun pendingCount(): Int
 
+    /** Backpressure is measured in pages (session + capture), not frames. */
+    @Query("SELECT COUNT(*) FROM (SELECT DISTINCT session_id, capture_id FROM pending_frames WHERE ack = 0)")
+    suspend fun pendingPageCount(): Int
+
+    @Query("SELECT COUNT(*) FROM pending_frames WHERE ack = 0 AND session_id = :sessionId AND capture_id = :captureId")
+    suspend fun pendingPageFrameCount(sessionId: String, captureId: String): Int
+
     @Query("SELECT COUNT(*) FROM pending_frames WHERE ack = 0 AND session_id = :sessionId")
     suspend fun pendingCountForSession(sessionId: String): Int
 

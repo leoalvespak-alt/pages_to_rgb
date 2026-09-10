@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -65,4 +66,32 @@ class Frame(Base):
     )
     android_orientation: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    frame_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requested_resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_esp_jpeg_quality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_esp_jpeg_quality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    configured_buffer_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    dma_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jpeg_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    jpeg_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    psram_free_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    psram_largest_block_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    capture_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    upload_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    storage_key_original: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_etag: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    received_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    fb_overflow: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    dma_overflow: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    watchdog_reset: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())

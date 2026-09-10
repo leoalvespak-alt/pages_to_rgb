@@ -2,6 +2,9 @@ package com.pagestoaudio.gateway.domain
 
 import android.util.Log
 import com.pagestoaudio.gateway.network.ApiService
+import com.pagestoaudio.gateway.network.CameraCapabilitiesV1
+import com.pagestoaudio.gateway.network.CameraConfigV2
+import com.pagestoaudio.gateway.network.CameraProfileSnapshot
 import com.pagestoaudio.gateway.network.EndSignalRequest
 import com.pagestoaudio.gateway.network.HandwrittenStartRequest
 import com.pagestoaudio.gateway.network.HeartbeatRequest
@@ -32,7 +35,13 @@ class SessionRepository(
         val sessionId: String,
         val cursor: Long = 0,
         val resumed: Boolean = false,
-        val status: String? = null
+        val status: String? = null,
+        val cameraProfileRevisionId: String? = null,
+        val cameraProfileSnapshot: CameraProfileSnapshot? = null,
+        val requestedCameraConfig: CameraConfigV2? = null,
+        val effectiveCameraConfig: CameraConfigV2? = null,
+        val firmwareVersion: String? = null,
+        val capabilitiesVersion: String? = null,
     )
 
     sealed class SessionResult {
@@ -47,6 +56,8 @@ class SessionRepository(
         deviceCodeOverride: String = deviceId,
         captureSourceOverride: String = "ANDROID_CAMERA",
         gatewayCodeOverride: String? = deviceId,
+        cameraMode: String = "OCR",
+        cameraCapabilitiesVersion: String? = null,
     ): SessionResult = withContext(Dispatchers.IO) {
         try {
             val req = StartSessionRequest(
@@ -55,7 +66,9 @@ class SessionRepository(
                 allowNewSession = allowNewSession,
                 resumeHint = resumeHint,
                 gatewayCode = gatewayCodeOverride,
-                lastSessionId = lastSessionId
+                lastSessionId = lastSessionId,
+                cameraMode = cameraMode,
+                cameraCapabilitiesVersion = cameraCapabilitiesVersion,
             )
             val resp = api.startSession(req)
             if (resp.isSuccessful) {
@@ -64,7 +77,13 @@ class SessionRepository(
                     sessionId = body.sessionId,
                     cursor = body.cursor,
                     resumed = body.resumed,
-                    status = body.status
+                    status = body.status,
+                    cameraProfileRevisionId = body.cameraProfileRevisionId,
+                    cameraProfileSnapshot = body.cameraProfileSnapshot,
+                    requestedCameraConfig = body.requestedCameraConfig,
+                    effectiveCameraConfig = body.effectiveCameraConfig,
+                    firmwareVersion = body.firmwareVersion,
+                    capabilitiesVersion = body.capabilitiesVersion,
                 )
                 Log.i(TAG, "startSession ok: session=${state.sessionId} resumed=${state.resumed} cursor=${state.cursor}")
                 historyDao?.upsert(SessionHistoryEntity(state.sessionId, "EXAM", System.currentTimeMillis(), status = state.status ?: "STARTED"))
@@ -77,6 +96,23 @@ class SessionRepository(
         } catch (e: Exception) {
             Log.e(TAG, "startSession exceção", e)
             SessionResult.Error("Erro de rede ao iniciar sessão: ${e.message}", e)
+        }
+    }
+
+    suspend fun cameraCapabilities(
+        deviceCode: String = deviceId,
+        advertisedVersion: String? = "v2",
+    ): Result<CameraCapabilitiesV1> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getCameraCapabilities(deviceCode, advertisedVersion)
+            if (response.isSuccessful) {
+                response.body()?.let { Result.success(it) }
+                    ?: Result.failure(IllegalStateException("empty camera capabilities"))
+            } else {
+                Result.failure(IllegalStateException("camera capabilities ${response.code()}"))
+            }
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 

@@ -200,6 +200,47 @@ class EspBridgeService : Service() {
             ): Boolean = app.sessionRepository.postRgbEvent(
                 sessionId, sequenceId, revision, event, nextIndex, itemCount, deviceId
             ).isSuccess
+
+            override suspend fun localRgbCommand(deviceId: String): String? {
+                val command = app.rgbCommandRepository.localCommands(deviceId, limit = 1).firstOrNull()
+                    ?: return null
+                val stop = command.status == "CANCELLED"
+                val requested = runCatching { JSONObject(command.requestedJson) }
+                    .getOrDefault(JSONObject())
+                val effective = runCatching { JSONObject(command.effectiveJson) }
+                    .getOrDefault(JSONObject())
+                return JSONObject()
+                    .put("command_id", command.commandId)
+                    .put("device_id", command.deviceCode)
+                    .put("session_id", command.sessionId)
+                    .put("kind", if (stop) "STOP" else command.kind)
+                    .put("status", command.status)
+                    .put("requested", requested)
+                    .put("effective", effective)
+                    .put("expires_at", command.expiresAt)
+                    .toString()
+            }
+
+            override suspend fun localRgbEvent(
+                deviceId: String,
+                commandId: String,
+                event: String,
+                payload: String,
+                effectivePayload: String,
+                firmwareVersion: String?,
+                deviceTimestamp: String?,
+                idempotencyKey: String,
+            ): Boolean = app.rgbCommandRepository.recordLocalEvent(
+                deviceCode = deviceId,
+                commandId = commandId,
+                event = event,
+                payloadJson = payload,
+                effectivePayloadJson = effectivePayload,
+                firmwareVersion = firmwareVersion,
+                deviceTimestamp = deviceTimestamp,
+                idempotencyKey = idempotencyKey,
+            ).isSuccess
+
         }
         val diagCloud = DiagCloudApi(
             baseUrl = app.config.baseUrl,
@@ -220,6 +261,18 @@ class EspBridgeService : Service() {
         scope.launch {
             val recovered = diagForwarder.recoverDurable()
             if (recovered > 0) Log.i(TAG, "diagnostics recovered=$recovered")
+        }
+        scope.launch {
+            // The cloud command bridge is service-owned; it does not depend on
+            // an Activity remaining visible while the ESP is in use.
+            while (isActive) {
+                if (app.config.isProvisioned) {
+                    provisioning.listDevices().forEach { deviceId ->
+                        app.enqueueRgbCommandSync(deviceId)
+                    }
+                }
+                kotlinx.coroutines.delay(5_000L)
+            }
         }
         scope.launch {
             // Cloud-created diagnostics are claimed by the gateway and exposed

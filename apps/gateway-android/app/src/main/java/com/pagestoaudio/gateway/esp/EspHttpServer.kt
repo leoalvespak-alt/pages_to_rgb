@@ -9,7 +9,7 @@ import java.io.File
 import java.io.InputStream
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.charset.Charsets
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,6 +56,18 @@ class EspHttpServer(
         /** Sequência RGB integral serializada (answers/palette/sha256 preservados). */
         suspend fun cloudRgbSequence(sessionId: String, sequenceId: String?): String?
         suspend fun cloudRgbEvent(sessionId: String, sequenceId: String, revision: Int, event: String, nextIndex: Int, itemCount: Int, deviceId: String): Boolean
+        /** Local RGB queue is read-only until the ESP posts its physical event. */
+        suspend fun localRgbCommand(deviceId: String): String?
+        suspend fun localRgbEvent(
+            deviceId: String,
+            commandId: String,
+            event: String,
+            payload: String,
+            effectivePayload: String,
+            firmwareVersion: String?,
+            deviceTimestamp: String?,
+            idempotencyKey: String,
+        ): Boolean
     }
 
     /** Erro cloud com código HTTP preservado (401/403/404/409/422/503 têm semântica distinta). */
@@ -116,6 +128,8 @@ class EspHttpServer(
                     req.method == "POST" && path == "/v1/device/fault" -> deviceFault(req)
                     req.method == "GET" && path == "/v1/device/rgb-sequence" -> deviceRgbSequence(req)
                     req.method == "POST" && path == "/v1/device/rgb-sequence/event" -> deviceRgbEvent(req)
+                    req.method == "GET" && path == "/v1/device/rgb-test" -> deviceRgbTestCommand(req)
+                    req.method == "POST" && path == "/v1/device/rgb-test/event" -> deviceRgbTestEvent(req)
                     req.method == "GET" && path == "/v1/device/diagnostics" -> diagStatus(req)
                     req.method == "POST" && path == "/v1/device/diagnostics" -> diagStart(req)
                     req.method == "POST" && path == "/v1/device/diagnostics/frame" -> diagFrame(req)
@@ -141,7 +155,7 @@ class EspHttpServer(
             .put("local_protocol", "P2A-LOCAL/1")
             .put("deprecated", "use POST /v1/device/hello")
             .put("gateway_id", provisioning.gatewayId())
-            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "camera_diagnostics_v1")))
+            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "rgb-test", "camera_diagnostics_v1")))
         return 200 to body.toString()
     }
 
@@ -182,7 +196,7 @@ class EspHttpServer(
             .put("local_protocol", "P2A-LOCAL/1")
             .put("gateway_id", provisioning.gatewayId())
             .put("device_id", deviceId)
-            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "camera_diagnostics_v1")))
+            .put("capabilities", org.json.JSONArray(listOf("frame", "capture-complete", "command", "result", "event", "heartbeat", "fault", "rgb-sequence", "rgb-test", "camera_diagnostics_v1")))
         return 200 to body.toString()
     }
 
@@ -536,6 +550,58 @@ class EspHttpServer(
         else 503 to JSONObject().put("error", "cloud unavailable").toString()
     }
 
+    /** Cloud RGB commands are staged in Room before the ESP is allowed to read them. */
+    private suspend fun deviceRgbTestCommand(req: HttpRequest): Pair<Int, String> {
+        val deviceId = req.query["device_id"] ?: ""
+        requireAuth(req, deviceId)?.let { return it }
+        val command = try { cloud.localRgbCommand(deviceId) } catch (e: Exception) {
+            Log.w(TAG, "local RGB command read failed", e)
+            null
+        }
+        return 200 to (command ?: JSONObject().put("command", "NONE").toString())
+    }
+
+    /** Persist the ESP event in the local outbox before acknowledging it. */
+    private suspend fun deviceRgbTestEvent(req: HttpRequest): Pair<Int, String> {
+        val json = try { JSONObject(req.bodyAsText()) } catch (_: Exception) {
+            return 400 to JSONObject().put("error", "invalid json").toString()
+        }
+        val deviceId = json.optString("device_id", "")
+        requireAuth(req, deviceId)?.let { return it }
+        val commandId = json.optString("command_id", "")
+        val event = json.optString("event", "")
+        if (!isValidEspId(commandId) || event !in setOf(
+                "FORWARDED", "RECEIVED", "APPLIED", "OFF", "FAILED", "EXPIRED", "CANCELLED"
+            )
+        ) {
+            return 422 to JSONObject().put("error", "invalid rgb test event").toString()
+        }
+        val payload = json.optJSONObject("payload")?.toString() ?: "{}"
+        val effective = json.optJSONObject("effective_payload")?.toString() ?: "{}"
+        val key = req.headers["idempotency-key"]?.takeIf { it.isNotBlank() }
+            ?: "$commandId:$event"
+        val accepted = try {
+            cloud.localRgbEvent(
+                deviceId = deviceId,
+                commandId = commandId,
+                event = event,
+                payload = payload,
+                effectivePayload = effective,
+                firmwareVersion = json.optString("firmware_version", "").takeIf { it.isNotBlank() },
+                deviceTimestamp = json.optString("device_timestamp", "").takeIf { it.isNotBlank() },
+                idempotencyKey = key,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "local RGB event persistence failed", e)
+            false
+        }
+        return if (accepted) {
+            200 to JSONObject().put("accepted", true).put("idempotency_key", key).toString()
+        } else {
+            409 to JSONObject().put("error", "local RGB event rejected").toString()
+        }
+    }
+
     private fun deviceEvent(req: HttpRequest): Pair<Int, String> {
         // Eventos locais persistidos antes de confirmar ao firmware quando há
         // transferência de responsabilidade (S03.8): grava em outbox-arquivo.
@@ -546,7 +612,7 @@ class EspHttpServer(
             if (!isValidEspId(deviceId)) return 422 to JSONObject().put("error", "invalid device").toString()
             val outbox = File(filesDir, "esp_outbox").apply { mkdirs() }
             val name = "evt-${System.currentTimeMillis()}-${(0..9999).random()}.json"
-            File(outbox, name).writeText(json.toString(), Charsets.UTF_8)
+            File(outbox, name).writeText(json.toString(), StandardCharsets.UTF_8)
             200 to JSONObject().put("accepted", true).put("duplicate", false).toString()
         } catch (_: Exception) {
             400 to JSONObject().put("error", "invalid event").toString()
@@ -562,7 +628,7 @@ class EspHttpServer(
         val headers: Map<String, String>,
         val body: ByteArray,
     ) {
-        fun bodyAsText(): String = body.toString(Charsets.UTF_8)
+        fun bodyAsText(): String = body.toString(StandardCharsets.UTF_8)
     }
 
     private fun readRequest(input: InputStream): HttpRequest? {
@@ -578,7 +644,7 @@ class EspHttpServer(
             if (matched == 4) break
             if (arr.size > 65536) return null
         }
-        val headerText = headerBytes.toByteArray().toString(Charsets.UTF_8)
+        val headerText = headerBytes.toByteArray().toString(StandardCharsets.UTF_8)
         val lines = headerText.split("\r\n")
         if (lines.isEmpty()) return null
         val requestLine = lines[0].split(" ")
@@ -609,7 +675,7 @@ class EspHttpServer(
     }
 
     private fun writeResponse(socket: Socket, code: Int, body: String) {
-        val bytes = body.toByteArray(Charsets.UTF_8)
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
         val status = when (code) {
             200 -> "OK"; 201 -> "Created"; 202 -> "Accepted"; 204 -> "No Content"; 208 -> "Already Reported"
             400 -> "Bad Request"; 401 -> "Unauthorized"; 404 -> "Not Found"
@@ -619,7 +685,7 @@ class EspHttpServer(
         }
         val head = "HTTP/1.1 $code $status\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
         val out = socket.getOutputStream()
-        out.write(head.toByteArray(Charsets.UTF_8))
+        out.write(head.toByteArray(StandardCharsets.UTF_8))
         out.write(bytes)
         out.flush()
     }

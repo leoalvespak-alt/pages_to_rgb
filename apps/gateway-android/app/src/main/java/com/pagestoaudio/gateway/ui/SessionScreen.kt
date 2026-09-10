@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,7 +69,6 @@ fun SessionScreen(
     )
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     // Vincular câmera quando sessão está CAPTURING e permissão concedida
@@ -85,7 +84,8 @@ fun SessionScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(12.dp),
+            .padding(12.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // ── TopBar ────────────────────────────────────────────────────────
@@ -93,31 +93,28 @@ fun SessionScreen(
             sessionId = uiState.sessionId,
             isConnected = uiState.isConnected,
             captureSource = uiState.captureSourceLabel,
-            onSelectSource = { viewModel.selectCaptureSource(it) }
         )
 
         Divider()
 
-        uiState.rgbTest?.let { test ->
-            val scale = test.brightnessPercent / 100f
-            val displayColor = if (test.active) Color(
-                red = (test.red * scale).toInt(),
-                green = (test.green * scale).toInt(),
-                blue = (test.blue * scale).toInt()
-            ) else Color.Black
-            Card(
-                modifier = Modifier.fillMaxWidth().height(180.dp),
-                colors = CardDefaults.cardColors(containerColor = displayColor)
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "TESTE RGB #${test.commandId}\n${test.red}, ${test.green}, ${test.blue} • ${test.brightnessPercent}%\nON ${test.onMs} ms • OFF ${test.offMs} ms",
-                        color = if (test.active && scale > .55f) Color.Black else Color.White,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
-            }
-        }
+        CameraSettingsPanel(
+            state = uiState.camera,
+            onModeChange = viewModel::setCameraMode,
+            onResolutionChange = viewModel::setCameraResolution,
+            onJpegQualityChange = viewModel::setCameraJpegQuality,
+            onBrightnessChange = { viewModel.setCameraTuning("brightness", it) },
+            onContrastChange = { viewModel.setCameraTuning("contrast", it) },
+            onSaturationChange = { viewModel.setCameraTuning("saturation", it) },
+            onToggle = viewModel::setCameraToggle,
+            onToggleAdvanced = viewModel::toggleCameraAdvanced,
+            onRefreshCapabilities = viewModel::refreshCameraCapabilities,
+        )
+
+        RgbPhysicalPanel(
+            isConnected = uiState.isConnected,
+            test = uiState.rgbTest,
+            onStop = viewModel::stopRgbTest,
+        )
 
         // ── Preview (só quando CAPTURING e permissão ok) ─────────────────
         if (hasCameraPermission && uiState.isCapturing) {
@@ -295,15 +292,15 @@ fun SessionScreen(
 
         // ── Log ───────────────────────────────────────────────────────────
         Text("Log:", style = MaterialTheme.typography.labelLarge)
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .height(160.dp)
                 .background(Color(0xFFFAFAFA))
                 .padding(6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            items(uiState.logs) { line ->
+            uiState.logs.takeLast(100).forEach { line ->
                 Text(line, style = MaterialTheme.typography.bodySmall, color = Color(0xFF37474F))
             }
         }
@@ -315,7 +312,6 @@ private fun TopBar(
     sessionId: String?,
     isConnected: Boolean,
     captureSource: String,
-    onSelectSource: (String) -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),

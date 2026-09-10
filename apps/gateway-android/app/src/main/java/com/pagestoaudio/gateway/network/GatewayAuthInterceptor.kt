@@ -17,7 +17,7 @@ class GatewayAuthInterceptor(
     private val deviceSecretProvider: () -> String?,
     private val firmwareVersionProvider: () -> String = { "gateway-android/1.0.0" },
     private val gatewayIdProvider: () -> String? = { null },
-    private val gatewaySecretProvider: () -> String? = null
+    private val gatewaySecretProvider: (() -> String?)? = null
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -27,7 +27,7 @@ class GatewayAuthInterceptor(
         val fw = firmwareVersionProvider()
         // S01.3: identidade cloud provisionada tem precedência sobre segredo legado.
         val gatewayId = gatewayIdProvider()
-        val gatewaySecret = gatewaySecretProvider() ?: deviceSecret
+        val gatewaySecret = gatewaySecretProvider?.invoke() ?: deviceSecret
 
         val builder = original.newBuilder()
             .header("X-Device-Id", deviceId)

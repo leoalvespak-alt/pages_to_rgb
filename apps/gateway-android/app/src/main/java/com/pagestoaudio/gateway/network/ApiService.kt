@@ -26,6 +26,12 @@ interface ApiService {
     @POST("gateway/session/start")
     suspend fun startSession(@Body body: StartSessionRequest): Response<StartSessionResponse>
 
+    @GET("gateway/camera/capabilities")
+    suspend fun getCameraCapabilities(
+        @Query("device_code") deviceCode: String,
+        @Header("X-Camera-Capabilities-Version") advertisedVersion: String? = null,
+    ): Response<CameraCapabilitiesV1>
+
     @POST("gateway/session/{id}/heartbeat")
     suspend fun heartbeat(
         @Path("id") sessionId: String,
@@ -105,6 +111,22 @@ interface ApiService {
         @Body body: RgbEventRequest
     ): Response<RgbEventResponse>
 
+    // ── Comandos RGB físicos por dispositivo ──────────────────────────────
+
+    @GET("gateway/devices/{device_id}/commands")
+    suspend fun getDeviceRgbCommands(
+        @Path("device_id") deviceId: String,
+        @Query("after") after: Long = 0
+    ): Response<RgbDeviceCommandPage>
+
+    @POST("gateway/devices/{device_id}/commands/{command_id}/events")
+    suspend fun postDeviceRgbEvent(
+        @Path("device_id") deviceId: String,
+        @Path("command_id") commandId: String,
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body body: RgbDeviceEventRequest
+    ): Response<RgbDeviceCommandResponse>
+
     // ── Handwritten (isolado de /gateway, 10 fotos) ────────────────
 
     @POST("handwritten/session/start")
@@ -174,14 +196,71 @@ data class StartSessionRequest(
     @SerializedName("last_session_id") val lastSessionId: String? = null,
     @SerializedName("gateway_code") val gatewayCode: String? = null,
     @SerializedName("reset_reason") val resetReason: String? = null,
-    @SerializedName("trigger") val trigger: String? = null
+    @SerializedName("trigger") val trigger: String? = null,
+    @SerializedName("camera_mode") val cameraMode: String = "OCR",
+    @SerializedName("camera_capabilities_version") val cameraCapabilitiesVersion: String? = null,
 )
 
 data class StartSessionResponse(
     @SerializedName("session_id") val sessionId: String,
     @SerializedName("cursor") val cursor: Long = 0,
     @SerializedName("resumed") val resumed: Boolean = false,
-    @SerializedName("status") val status: String? = null
+    @SerializedName("status") val status: String? = null,
+    @SerializedName("camera_profile_revision_id") val cameraProfileRevisionId: String? = null,
+    @SerializedName("camera_profile_snapshot") val cameraProfileSnapshot: CameraProfileSnapshot? = null,
+    @SerializedName("requested_camera_config") val requestedCameraConfig: CameraConfigV2? = null,
+    @SerializedName("effective_camera_config") val effectiveCameraConfig: CameraConfigV2? = null,
+    @SerializedName("firmware_version") val firmwareVersion: String? = null,
+    @SerializedName("capabilities_version") val capabilitiesVersion: String? = null,
+)
+
+data class CameraCapabilitiesV1(
+    @SerializedName("version") val version: String = "v1",
+    @SerializedName("contract_version") val contractVersion: String = "v2",
+    @SerializedName("firmware_version") val firmwareVersion: String? = null,
+    @SerializedName("driver_version") val driverVersion: String? = null,
+    @SerializedName("available") val available: Map<String, Any> = emptyMap(),
+    @SerializedName("protected") val protected: Map<String, Any> = emptyMap(),
+    @SerializedName("unavailable") val unavailable: Map<String, String> = emptyMap(),
+    @SerializedName("feature_enabled") val featureEnabled: Boolean = false,
+    @SerializedName("compatible") val compatible: Boolean = false,
+    @SerializedName("reason_code") val reasonCode: String? = null,
+    @SerializedName("message") val message: String = "",
+)
+
+data class CameraProfileSnapshot(
+    @SerializedName("mode") val mode: String? = null,
+    @SerializedName("revision") val revision: Int? = null,
+    @SerializedName("public_id") val publicId: String? = null,
+    @SerializedName("capabilities_version") val capabilitiesVersion: String? = null,
+    @SerializedName("config") val config: CameraConfigV2? = null,
+)
+
+data class CameraConfigV2(
+    @SerializedName("frame_size") val frameSize: String? = null,
+    @SerializedName("esp_jpeg_quality") val espJpegQuality: Int? = null,
+    @SerializedName("frame_count") val frameCount: Int? = null,
+    @SerializedName("intra_frame_gap_ms") val intraFrameGapMs: Int? = null,
+    @SerializedName("page_interval_ms") val pageIntervalMs: Int? = null,
+    @SerializedName("android_jpeg_quality_percent") val androidJpegQualityPercent: Int? = null,
+    @SerializedName("brightness") val brightness: Int? = null,
+    @SerializedName("contrast") val contrast: Int? = null,
+    @SerializedName("saturation") val saturation: Int? = null,
+    @SerializedName("awb") val awb: Boolean? = null,
+    @SerializedName("awb_gain") val awbGain: Boolean? = null,
+    @SerializedName("wb_mode") val wbMode: String? = null,
+    @SerializedName("aec") val aec: Boolean? = null,
+    @SerializedName("aec2") val aec2: Boolean? = null,
+    @SerializedName("agc") val agc: Boolean? = null,
+    @SerializedName("bpc") val bpc: Boolean? = null,
+    @SerializedName("wpc") val wpc: Boolean? = null,
+    @SerializedName("raw_gamma") val rawGamma: Boolean? = null,
+    @SerializedName("lens_correction") val lensCorrection: Boolean? = null,
+    @SerializedName("dcw") val dcw: Boolean? = null,
+    @SerializedName("hmirror") val hmirror: Boolean? = null,
+    @SerializedName("vflip") val vflip: Boolean? = null,
+    @SerializedName("special_effect") val specialEffect: String? = null,
+    @SerializedName("colorbar") val colorbar: Boolean? = null,
 )
 
 data class HeartbeatRequest(
@@ -294,6 +373,37 @@ data class RgbTestCommandResponse(
     @SerializedName("brightness_percent") val brightnessPercent: Int,
     @SerializedName("on_ms") val onMs: Long,
     @SerializedName("off_ms") val offMs: Long
+)
+
+data class RgbDeviceCommandPage(
+    @SerializedName("items") val items: List<RgbDeviceCommand> = emptyList(),
+    @SerializedName("cursor") val cursor: Long = 0,
+)
+
+data class RgbDeviceCommand(
+    @SerializedName("command_id") val commandId: String,
+    @SerializedName("device_code") val deviceCode: String,
+    @SerializedName("session_id") val sessionId: String? = null,
+    @SerializedName("kind") val kind: String = "TEST",
+    @SerializedName("status") val status: String,
+    @SerializedName("requested") val requested: Map<String, Any> = emptyMap(),
+    @SerializedName("effective") val effective: Map<String, Any> = emptyMap(),
+    @SerializedName("expires_at") val expiresAt: String,
+    @SerializedName("failure_reason") val failureReason: String? = null,
+    @SerializedName("idempotent") val idempotent: Boolean = false,
+)
+
+data class RgbDeviceEventRequest(
+    @SerializedName("event") val event: String,
+    @SerializedName("effective_payload") val effectivePayload: Map<String, Any> = emptyMap(),
+    @SerializedName("payload") val payload: Map<String, Any> = emptyMap(),
+    @SerializedName("firmware_version") val firmwareVersion: String? = null,
+    @SerializedName("device_timestamp") val deviceTimestamp: String? = null,
+)
+
+data class RgbDeviceCommandResponse(
+    @SerializedName("command_id") val commandId: String? = null,
+    @SerializedName("status") val status: String? = null,
 )
 
 data class RgbEventRequest(

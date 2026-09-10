@@ -105,7 +105,7 @@ class EspDiscoveryResponder(
     private fun pruneLocked(now: Long) {
         val it = seen.entries.iterator()
         while (it.hasNext()) {
-            if (now - it.next().getValue() > REPLAY_WINDOW_MS) it.remove()
+            if (now - it.next().value > REPLAY_WINDOW_MS) it.remove()
         }
         while (seen.size > REPLAY_MAX) {
             seen.entries.iterator().let { e -> if (e.hasNext()) { e.next(); e.remove() } }

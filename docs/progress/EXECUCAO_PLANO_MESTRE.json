@@ -1,0 +1,1271 @@
+{
+  "schema_version": 1,
+  "plan": "docs/PLANO_MESTRE_PRODUCAO_CAMERA_RGB_2026-09-09.md",
+  "created_at": "2026-09-09T17:39:04+00:00",
+  "updated_at": "2026-09-10T03:05:54+00:00",
+  "workflow": [
+    "G00-A",
+    "G09",
+    "G01",
+    "G02",
+    "G03",
+    "G04",
+    "G05",
+    "G06",
+    "G07",
+    "G13",
+    "G17",
+    "G19",
+    "G22",
+    "G24"
+  ],
+  "gates": {
+    "G00-A": {
+      "title": "Baseline, caminhos, Git e diffs preservados",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [],
+      "required_evidence": [
+        "command",
+        "note"
+      ],
+      "started_at": "2026-09-09T17:51:03+00:00",
+      "completed_at": "2026-09-09T17:51:15+00:00",
+      "summary": "Caminhos reais, diffs preexistentes, branches, HEADs e remotes reconfirmados e registrados; nenhum arquivo alterado pelo gate.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T17:51:04+00:00",
+          "kind": "command",
+          "value": "Inicialização obrigatória: verify=OK (25 gates, dashboard sincronizado); status/next retornaram G00-A PENDENTE. Reconfirmação servidor: C:/Users/Lenovo/Downloads/pagestoaudio_servidor, branch codex/conclusao-pos-reauditoria-2026-09-09, HEAD 62aeb3c, origin https://github.com/leoalvespak-alt/pages_to_rgb.git, origin/main=be34d8a. Reconfirmação firmware: git rev-parse --show-toplevel retornou C:/Users/Lenovo, branch develop e remote git@github-gazetacon:leoalvespak-alt/gazetacon.git."
+        },
+        {
+          "recorded_at": "2026-09-09T17:51:04+00:00",
+          "kind": "note",
+          "value": "Baseline preservada sem alteração de arquivos: docs/contracts/RGB_RESULT_V1.md modificado preexistente; AGENTS.md, plano, estado/dashboard gerados, scripts/plan_control.py e tests/test_plan_control.py não rastreados preexistentes. Firmware em C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1 resolve ao repositório pai gazetacon; não usar esse pai para commits. G00-A não autoriza inventar remote/branch do firmware."
+        }
+      ],
+      "blockers": []
+    },
+    "G09": {
+      "title": "Repositório e branch legítimos do firmware",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G00-A"
+      ],
+      "required_evidence": [
+        "command",
+        "note"
+      ],
+      "started_at": "2026-09-09T17:52:24+00:00",
+      "completed_at": "2026-09-09T18:08:41+00:00",
+      "summary": "Repositório independente legítimo criado e publicado; topo Git exato, branch main padrão/sincronizada, baseline e decisão documentados, árvore limpa, sem builds/secrets/NVS/BIN Diagnostic.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T17:52:24+00:00",
+          "kind": "command",
+          "value": "Descoberta F00 executada: rg em README, AGENTS, .gitignore, manifests e docs do firmware não encontrou URL/remote oficial; git rev-parse --show-toplevel continua C:/Users/Lenovo, status está no branch develop do repositório pai e remote é git@github-gazetacon:leoalvespak-alt/gazetacon.git."
+        },
+        {
+          "recorded_at": "2026-09-09T17:52:25+00:00",
+          "kind": "note",
+          "value": "Nenhum repositório Git próprio, remote oficial ou branch oficial foi determinado por fontes locais. O plano exige top-level exatamente C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1 e proíbe commits no pai gazetacon. Não criar Git, remote, branch ou copiar/clonar conteúdo sem decisão/autorização externa legítima."
+        },
+        {
+          "recorded_at": "2026-09-09T17:59:18+00:00",
+          "kind": "note",
+          "value": "Autorização explícita recebida do usuário nesta retomada: criar repositório Git próprio dentro de C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1. Branch local padrão definida como main; nenhum remote será inventado ou configurado sem destino fornecido."
+        },
+        {
+          "recorded_at": "2026-09-09T18:00:12+00:00",
+          "kind": "command",
+          "value": "Atualização controlada de .gitignore via apply_patch no firmware: adicionados build-*/, managed_components/, sdkconfig local, credencial privada, artefatos *.bin/*.elf/*.map, release/**/flash_args e arquivos NVS/OS; resultado aplicado sem tocar código-fonte."
+        },
+        {
+          "recorded_at": "2026-09-09T18:01:30+00:00",
+          "kind": "command",
+          "value": "git init -b main foi executado com caminho absoluto somente em C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1. Resultado verificado: git rev-parse --show-toplevel aponta exatamente para a pasta do firmware; status sem commits em main; remote vazio. Tentativa anterior sem -C ocorreu no servidor e somente re-inicializou seu .git existente; git status do servidor permaneceu com os diffs preexistentes."
+        },
+        {
+          "recorded_at": "2026-09-09T18:02:46+00:00",
+          "kind": "command",
+          "value": "Baseline do firmware verificado antes do commit: git diff --cached --check não reportou erros; 76 arquivos de fonte/configuração/documentação staged; exclusões confirmadas para build-*/, private_config.h, *.bin, *.elf, *.map, NVS e .playwright-mcp."
+        },
+        {
+          "recorded_at": "2026-09-09T18:03:09+00:00",
+          "kind": "commit",
+          "value": "Firmware repository baseline commit 4eaab0f (chore(firmware): establish independent repository baseline), criado somente em C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1."
+        },
+        {
+          "recorded_at": "2026-09-09T18:06:15+00:00",
+          "kind": "note",
+          "value": "Descoberta documental final: docs/REGISTRO_EXECUCAO_F00-F05_2026-09-09.md registra que não havia repositório próprio; docs/PLANO_TESTE_MANUSCRITO_R2_TUNNEL.md identifica https://github.com/leoalvespak-alt/pages_to_rgb.git como repo do servidor, não do firmware; plano canônico exige remote próprio. gh repo list leoalvespak-alt não contém repositório de firmware correspondente."
+        },
+        {
+          "recorded_at": "2026-09-09T18:06:35+00:00",
+          "kind": "command",
+          "value": "GitHub remote criado explicitamente após autorização do usuário: https://github.com/leoalvespak-alt/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1 (privado), via gh repo create; criação concluída sem secrets no repositório."
+        },
+        {
+          "recorded_at": "2026-09-09T18:06:51+00:00",
+          "kind": "command",
+          "value": "origin configurado no repositório independente do firmware com fetch/push https://github.com/leoalvespak-alt/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1.git; branch local main confirmada."
+        },
+        {
+          "recorded_at": "2026-09-09T18:07:34+00:00",
+          "kind": "documentation",
+          "value": "Criado docs/REPOSITORIO_FIRMWARE_G09_2026-09-09.md registrando busca documental, autorização do usuário, remote privado criado, branch main, baseline 4eaab0f, exclusões e limites Production-only."
+        },
+        {
+          "recorded_at": "2026-09-09T18:07:42+00:00",
+          "kind": "command",
+          "value": "Documento G09 staged e verificado: git diff --cached --check sem erros; somente docs/REPOSITORIO_FIRMWARE_G09_2026-09-09.md staged (40 linhas)."
+        },
+        {
+          "recorded_at": "2026-09-09T18:07:56+00:00",
+          "kind": "commit",
+          "value": "Firmware repository documentation commit e17e86d (docs(firmware): record independent repository for G09)."
+        },
+        {
+          "recorded_at": "2026-09-09T18:08:07+00:00",
+          "kind": "command",
+          "value": "git push origin main concluído: origin/main avançou de 4eaab0f para e17e86d sem force push."
+        },
+        {
+          "recorded_at": "2026-09-09T18:08:31+00:00",
+          "kind": "command",
+          "value": "Validação final G09: GitHub reporta repositório privado Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1 com defaultBranchRef=main; git status está limpo e sincronizado main...origin/main; git ls-remote confirma origin/main=e17e86df2f5cab43ffc35219883a51ffbb44c452."
+        }
+      ],
+      "blockers": [
+        {
+          "created_at": "2026-09-09T17:52:25+00:00",
+          "reason": "Bloqueio externo: falta fornecer o remote e branch oficiais do firmware ou autorizar explicitamente a criação de um repositório novo dentro de C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1, incluindo destino/remote e branch padrão. Evidência: rev-parse aponta C:/Users/Lenovo e remote gazetacon; descoberta documental local sem destino oficial.",
+          "resolved_at": "2026-09-09T17:59:18+00:00"
+        },
+        {
+          "created_at": "2026-09-09T18:03:21+00:00",
+          "reason": "Dependência externa restante: repositório próprio e baseline 4eaab0f foram criados em C:/Users/Lenovo/Downloads/Pages_to_Audio_ESP32S3_CAM_N16R8_FW_V2_1, branch main e topo correto confirmados, porém nenhum remote foi fornecido. Para satisfazer G09 e permitir push/PR em G18, fornecer o destino/URL do remote legítimo; não configurar remote por suposição.",
+          "resolved_at": "2026-09-09T18:06:14+00:00"
+        }
+      ]
+    },
+    "G01": {
+      "title": "Migração aditiva e persistência",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G09"
+      ],
+      "required_evidence": [
+        "command",
+        "test"
+      ],
+      "started_at": "2026-09-09T18:09:42+00:00",
+      "completed_at": "2026-09-09T18:36:41+00:00",
+      "summary": "Migração 0013 aditiva implementada; modelos/telemetria/perfis/comandos RGB auditáveis; Alembic 0003->0013 aplicado na instância documentada; banco vazio e cadeia representativa validados; downgrade 0013->0012 e re-upgrade ensaiados preservando legado; integridade/índices aprovados; 442 testes passaram; rollback lógico documentado.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T18:12:19+00:00",
+          "kind": "command",
+          "value": "Alembic head check attempted with system Python and failed because alembic is not installed; uv 0.11.16 is available but uv run could not use existing server .venv due Windows access-denied removal of .venv/lib64. No source files changed."
+        },
+        {
+          "recorded_at": "2026-09-09T18:13:08+00:00",
+          "kind": "command",
+          "value": "Ambiente de verificação isolado criado fora do repositório em C:/Users/Lenovo/AppData/Local/Temp/pages-to-audio-g01-venv com uv sync --frozen --dev; uv run --frozen python -m alembic heads confirmou 0012 (head)."
+        },
+        {
+          "recorded_at": "2026-09-09T18:18:44+00:00",
+          "kind": "command",
+          "value": "Implementação do G01 adicionou migration 0013_camera_profiles_rgb_device_commands.py e modelos CameraProfileRevision/RgbDeviceCommand/RgbDeviceCommandEvent, além de campos de snapshot/telemetria em sessions/captures/frames; import do metadata confirmado no ambiente UV isolado: 7 tabelas presentes, legacy rgb_test_commands preservada."
+        },
+        {
+          "recorded_at": "2026-09-09T18:21:23+00:00",
+          "kind": "command",
+          "value": "G01 lint: ruff check passed for all changed models and migration (All checks passed)."
+        },
+        {
+          "recorded_at": "2026-09-09T18:22:50+00:00",
+          "kind": "command",
+          "value": "G01 lint including migration contract tests: ruff check passed for all changed models, migration, and test files."
+        },
+        {
+          "recorded_at": "2026-09-09T18:23:54+00:00",
+          "kind": "test",
+          "value": "G01 migration contract suite: 3 passed; legacy tables retained, required profile/telemetry/command fields present, PostgreSQL DDL compiles, and downgrade is additive."
+        },
+        {
+          "recorded_at": "2026-09-09T18:24:26+00:00",
+          "kind": "test",
+          "value": "G01 Alembic offline PostgreSQL compilation: upgrade 0012->0013 generated successfully with transactional DDL, all additive tables/columns/constraints/indexes present."
+        },
+        {
+          "recorded_at": "2026-09-09T18:25:07+00:00",
+          "kind": "command",
+          "value": "G01 real PostgreSQL probe: Windows service postgresql-x64-17 is listening on 5432, but Alembic current with documented local DATABASE_URL failed with asyncpg ConnectionDoesNotExistError/WinError 64 before reading the database."
+        },
+        {
+          "recorded_at": "2026-09-09T18:26:55+00:00",
+          "kind": "command",
+          "value": "G01 PostgreSQL fixture probe: documented host 172.29.52.81 reachable; Alembic current=0003; sessions/captures/frames existed empty and legacy rgb_test_commands was absent at 0003."
+        },
+        {
+          "recorded_at": "2026-09-09T18:27:18+00:00",
+          "kind": "test",
+          "value": "G01 database upgrade: documented PostgreSQL moved 0003 -> 0013 successfully, including all intermediate additive migrations and 0013."
+        },
+        {
+          "recorded_at": "2026-09-09T18:30:30+00:00",
+          "kind": "command",
+          "value": "G01 live-fixture helper lint: ruff check passed; helper uses only the documented PostgreSQL fixture and deterministic scoped cleanup."
+        },
+        {
+          "recorded_at": "2026-09-09T18:31:08+00:00",
+          "kind": "test",
+          "value": "G01 live PostgreSQL empty-schema fixture: at 0013 all target tables were empty, then one representative device/gateway/session/capture/frame chain was inserted successfully."
+        },
+        {
+          "recorded_at": "2026-09-09T18:31:27+00:00",
+          "kind": "test",
+          "value": "G01 logical downgrade 0013->0012 executed successfully; migration removed only S03 additions and preserved legacy schema/data path."
+        },
+        {
+          "recorded_at": "2026-09-09T18:31:45+00:00",
+          "kind": "test",
+          "value": "G01 downgrade preservation: at version 0012, representative devices/gateway/session/capture/frame each remained present exactly once (1/1/1/1/1)."
+        },
+        {
+          "recorded_at": "2026-09-09T18:32:02+00:00",
+          "kind": "test",
+          "value": "G01 re-upgrade 0012->0013 succeeded after downgrade, restoring the additive camera profile, telemetry, and RGB command schema."
+        },
+        {
+          "recorded_at": "2026-09-09T18:32:19+00:00",
+          "kind": "test",
+          "value": "G01 re-upgrade verification: version 0013, no required columns missing, and all representative legacy rows still present exactly once."
+        },
+        {
+          "recorded_at": "2026-09-09T18:32:37+00:00",
+          "kind": "test",
+          "value": "G01 live fixture cleanup: scoped representative rows removed from documented PostgreSQL fixture after compatibility verification."
+        },
+        {
+          "recorded_at": "2026-09-09T18:33:32+00:00",
+          "kind": "command",
+          "value": "G01 live-fixture integrity checker lint: ruff check passed after adding live index/constraint assertions."
+        },
+        {
+          "recorded_at": "2026-09-09T18:33:49+00:00",
+          "kind": "test",
+          "value": "G01 live PostgreSQL integrity: all required legacy idempotency indexes, new profile/command/event indexes, unique constraints, and duration constraint were present; none missing."
+        },
+        {
+          "recorded_at": "2026-09-09T18:34:13+00:00",
+          "kind": "documentation",
+          "value": "docs/REGISTRO_EXECUCAO_G01_2026-09-09.md registra migração 0013, ensaio 0013->0012->0013, preservação de dados legados, rollback lógico de aplicação e limites sem Vídeo/BIN Diagnostic."
+        },
+        {
+          "recorded_at": "2026-09-09T18:35:09+00:00",
+          "kind": "test",
+          "value": "G01 regression suite: 442 passed, 1 skipped, 1 existing dependency warning; no test failures."
+        },
+        {
+          "recorded_at": "2026-09-09T18:35:59+00:00",
+          "kind": "command",
+          "value": "G01 live-fixture checker lint remains green after adding post-cleanup assertions."
+        },
+        {
+          "recorded_at": "2026-09-09T18:36:17+00:00",
+          "kind": "test",
+          "value": "G01 fixture cleanup verification: PostgreSQL head remains 0013 and sessions/captures/frames/profile/command/event tables are all back to zero rows."
+        }
+      ],
+      "blockers": []
+    },
+    "G02": {
+      "title": "Matriz OV2640 confirmada",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G01"
+      ],
+      "required_evidence": [
+        "documentation",
+        "note"
+      ],
+      "started_at": "2026-09-09T18:44:38+00:00",
+      "completed_at": "2026-09-09T18:46:25+00:00",
+      "summary": "Matriz OV2640 dedicada criada com 59 recursos individuais e 7 colunas; datasheet v1.6, esp32-camera 2.1.7 com commit/tag e component_hash, sensor.h/ov2640.c, ESP32-S3 e CameraWebServer citados; decisões de produto conservadoras, mensagens obrigatórias e exclusão de Vídeo registradas.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T18:44:45+00:00",
+          "kind": "documentation",
+          "value": "docs/OV2640_MATRIZ_COMPATIBILIDADE_2026-09-09.md criada com 59 recursos individuais, 7 colunas exigidas, fontes locais/externas, esp32-camera 2.1.7, commit v2.1.7 202df95d7b1dc72e9303ad78f47b8dc9f339e6a1 e component_hash do lockfile."
+        },
+        {
+          "recorded_at": "2026-09-09T18:45:45+00:00",
+          "kind": "note",
+          "value": "Validação estrutural da matriz: 59 linhas de recursos, 7 colunas por linha, nenhuma célula de classificação fora da lista autorizada; commit/hash do componente confirmados no documento."
+        },
+        {
+          "recorded_at": "2026-09-09T18:46:12+00:00",
+          "kind": "command",
+          "value": "G02 source audit: local lock pins esp32-camera 2.1.7/ESP-IDF 6.0.2 and component_hash; official v2.1.7 resolves to 202df95d7b1dc72e9303ad78f47b8dc9f339e6a1; ov2640.c exposes register/XCLK/windowing but assigns sharpness/denoise and PLL stubs and NULL autofocus."
+        }
+      ],
+      "blockers": []
+    },
+    "G03": {
+      "title": "Backend de capacidades e perfis",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G02"
+      ],
+      "required_evidence": [
+        "test"
+      ],
+      "started_at": "2026-09-09T18:46:47+00:00",
+      "completed_at": "2026-09-09T19:04:24+00:00",
+      "summary": "API CameraCapabilitiesV1 e perfis imutáveis OCR/PHOTO implementados; migração 0013 validada pelo G01; feature flag v2 desligada; snapshot/auditoria/solicitado-vs-efetivo e incompatibilidade de firmware cobertos; 450 testes passaram.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T18:56:43+00:00",
+          "kind": "command",
+          "value": "Ruff invocation initially hit the pre-existing locked .venv; retry will use the documented external temporary environment."
+        },
+        {
+          "recorded_at": "2026-09-09T18:57:01+00:00",
+          "kind": "command",
+          "value": "Ruff identified only import ordering and line-length issues in the new contract/router/service; no semantic failure."
+        },
+        {
+          "recorded_at": "2026-09-09T18:57:34+00:00",
+          "kind": "command",
+          "value": "Ruff import-order pass found two auto-fixable import blocks after the first correction."
+        },
+        {
+          "recorded_at": "2026-09-09T18:57:58+00:00",
+          "kind": "command",
+          "value": "Ruff format check found two mechanical formatting differences in the new schema/service."
+        },
+        {
+          "recorded_at": "2026-09-09T18:59:07+00:00",
+          "kind": "test",
+          "value": "Ruff checks passed for the G03 camera contract, schemas, routers, settings, gateway integration and contract tests."
+        },
+        {
+          "recorded_at": "2026-09-09T18:59:43+00:00",
+          "kind": "test",
+          "value": "Focused G03/API compatibility suite passed: 57 passed, 1 skipped; existing Android session, request/response, RGB and handwritten contract tests remain green."
+        },
+        {
+          "recorded_at": "2026-09-09T19:00:31+00:00",
+          "kind": "command",
+          "value": "Ruff found one line-length issue in the added revision/audit unit test."
+        },
+        {
+          "recorded_at": "2026-09-09T19:00:57+00:00",
+          "kind": "test",
+          "value": "Ruff checks passed after adding the revision supersession/audit test."
+        },
+        {
+          "recorded_at": "2026-09-09T19:01:23+00:00",
+          "kind": "test",
+          "value": "Focused G03 run exposed a test-fixture sequencing error only: global profile creation does not query a device; implementation behavior otherwise reached revision creation."
+        },
+        {
+          "recorded_at": "2026-09-09T19:01:49+00:00",
+          "kind": "test",
+          "value": "G03-specific contract suite passed after fixture correction: 8 passed."
+        },
+        {
+          "recorded_at": "2026-09-09T19:02:11+00:00",
+          "kind": "test",
+          "value": "Repository ruff validation passed for apps/api, src and the new G03 contract tests."
+        },
+        {
+          "recorded_at": "2026-09-09T19:03:00+00:00",
+          "kind": "test",
+          "value": "Full backend suite passed after G03 implementation: 450 passed, 1 skipped, 1 existing warning; no regressions."
+        },
+        {
+          "recorded_at": "2026-09-09T19:03:28+00:00",
+          "kind": "command",
+          "value": "Read-only diff/status check completed; no whitespace errors. The attempted session.py path was absent because this repository exposes the unit-of-work in db/uow.py."
+        },
+        {
+          "recorded_at": "2026-09-09T19:03:52+00:00",
+          "kind": "command",
+          "value": "Alembic check against the existing live schema reports pre-existing baseline/model drift (timestamps, legacy tables, vector extension and unnamed check constraints), not a pending G03 migration; migration 0013 live upgrade/downgrade/integrity evidence remains the authoritative schema approval from G01."
+        },
+        {
+          "recorded_at": "2026-09-09T19:04:00+00:00",
+          "kind": "documentation",
+          "value": "docs/contracts/CAMERA_CONTROL_V2.md documents endpoints, capabilities, immutable revisions, requested/effective snapshot, old firmware incompatibility, feature flag rollback, and explicit exclusion of Video/BIN Diagnostic."
+        },
+        {
+          "recorded_at": "2026-09-09T19:04:14+00:00",
+          "kind": "command",
+          "value": "Controller status confirms G03 is the only active gate and has the required test evidence; later gates remain untouched."
+        }
+      ],
+      "blockers": []
+    },
+    "G04": {
+      "title": "Upload, original e telemetria",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G03"
+      ],
+      "required_evidence": [
+        "test"
+      ],
+      "started_at": "2026-09-09T19:05:07+00:00",
+      "completed_at": "2026-09-09T19:18:59+00:00",
+      "summary": "Upload validado com SHA origem/banco/storage original, derivado OCR separado e imutável, retry idempotente/conflitante, telemetria completa, identidade page/frame, ordem lógica e capture-complete autoritativo; 454 testes passaram.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T19:05:12+00:00",
+          "kind": "command",
+          "value": "Controller next selected G04; work will remain limited to upload, originals and telemetry."
+        },
+        {
+          "recorded_at": "2026-09-09T19:08:18+00:00",
+          "kind": "command",
+          "value": "Auditoria do fluxo existente encontrou upload com validação de MIME/magic/decode, SHA-256, storage original imutável, idempotência e órfãos; também identificou a necessidade de corrigir o retorno de capture-complete e ligar telemetria/derivado."
+        },
+        {
+          "recorded_at": "2026-09-09T19:12:36+00:00",
+          "kind": "command",
+          "value": "G04 changes added explicit page/frame telemetry headers, authoritative decoded dimensions, original SHA/size confirmation fields, immutable OCR derivative linkage and fixed capture-complete response."
+        },
+        {
+          "recorded_at": "2026-09-09T19:13:04+00:00",
+          "kind": "test",
+          "value": "Existing upload/idempotency regression tests passed after derivative and telemetry integration: 5 passed, 20 deselected."
+        },
+        {
+          "recorded_at": "2026-09-09T19:14:23+00:00",
+          "kind": "command",
+          "value": "Ruff found only import ordering and two line-length issues in the new upload contract test."
+        },
+        {
+          "recorded_at": "2026-09-09T19:14:46+00:00",
+          "kind": "test",
+          "value": "Ruff validation passed for the complete G04 upload/derivative/telemetry change set and its contract tests."
+        },
+        {
+          "recorded_at": "2026-09-09T19:15:17+00:00",
+          "kind": "test",
+          "value": "G04 upload suite passed: 8 passed, 20 deselected; valid original/derived SHA paths, truncation rejection, telemetry and logical-page ordering verified alongside existing idempotency cases."
+        },
+        {
+          "recorded_at": "2026-09-09T19:15:40+00:00",
+          "kind": "test",
+          "value": "Ruff passed after adding the authoritative capture-complete regression test."
+        },
+        {
+          "recorded_at": "2026-09-09T19:15:59+00:00",
+          "kind": "test",
+          "value": "G04-specific contract tests passed: 4 passed."
+        },
+        {
+          "recorded_at": "2026-09-09T19:16:43+00:00",
+          "kind": "test",
+          "value": "Full backend regression after G04 passed: 454 passed, 1 skipped, 1 existing warning."
+        },
+        {
+          "recorded_at": "2026-09-09T19:17:06+00:00",
+          "kind": "documentation",
+          "value": "docs/REGISTRO_EXECUCAO_G04_2026-09-09.md registra SHA origem/banco/objeto, derivado separado, idempotência, telemetria, ordenação lógica, correção capture-complete, testes e rollback."
+        },
+        {
+          "recorded_at": "2026-09-09T19:17:35+00:00",
+          "kind": "command",
+          "value": "Retry response adjustment required only import normalization; no functional test failure."
+        },
+        {
+          "recorded_at": "2026-09-09T19:18:06+00:00",
+          "kind": "test",
+          "value": "After retry confirmation adjustment, focused G04 upload/idempotency tests passed: 6 passed, 23 deselected."
+        },
+        {
+          "recorded_at": "2026-09-09T19:18:49+00:00",
+          "kind": "test",
+          "value": "Final full backend regression for G04 passed: 454 passed, 1 skipped, 1 existing warning."
+        }
+      ],
+      "blockers": []
+    },
+    "G05": {
+      "title": "Backend RGB físico",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G04"
+      ],
+      "required_evidence": [
+        "test"
+      ],
+      "started_at": "2026-09-09T19:19:20+00:00",
+      "completed_at": "2026-09-09T19:39:18+00:00",
+      "summary": "Backend RGB físico implementado e validado localmente: comandos por dispositivo, validação RGB/hex e duração, máquina de estados com eventos duráveis, timeout auditado, idempotência, STOP sem falsificar OFF, exclusão mútua com sequência real, rotas admin/gateway autenticadas, adaptador legado e documentação; 466 testes passaram, 1 foi ignorado.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T19:19:27+00:00",
+          "kind": "command",
+          "value": "Controller started G05; scope is restricted to the backend RGB physical command/sequence contract."
+        },
+        {
+          "recorded_at": "2026-09-09T19:25:08+00:00",
+          "kind": "command",
+          "value": "Implemented the G05 schemas and audited RGB device command service; verifying source and lint before routes."
+        },
+        {
+          "recorded_at": "2026-09-09T19:25:25+00:00",
+          "kind": "test",
+          "value": "Focused Ruff check executed for G05 schemas/service; two E501 findings identified in device_commands.py for correction."
+        },
+        {
+          "recorded_at": "2026-09-09T19:30:38+00:00",
+          "kind": "test",
+          "value": "Focused Ruff check executed after route wiring; only import ordering findings remain in main.py and admin_settings.py."
+        },
+        {
+          "recorded_at": "2026-09-09T19:30:54+00:00",
+          "kind": "command",
+          "value": "Ruff auto-fixed import ordering after adding the physical RGB command routers and legacy endpoint adapter."
+        },
+        {
+          "recorded_at": "2026-09-09T19:31:08+00:00",
+          "kind": "test",
+          "value": "Focused Ruff check passed for G05 schemas, service, legacy adapter, route modules, and app wiring."
+        },
+        {
+          "recorded_at": "2026-09-09T19:32:53+00:00",
+          "kind": "test",
+          "value": "G05 contract test lint identified one unused import and one line-length finding in the new test module; no production logic findings."
+        },
+        {
+          "recorded_at": "2026-09-09T19:33:11+00:00",
+          "kind": "test",
+          "value": "Ruff now passes for the complete G05 production RGB command implementation and contract test module."
+        },
+        {
+          "recorded_at": "2026-09-09T19:33:39+00:00",
+          "kind": "test",
+          "value": "Focused G05 contract tests executed: 30 passed and 3 test-harness queue setup failures found in conflict, STOP, and idempotency cases; production traceback is confined to the fake-session setup."
+        },
+        {
+          "recorded_at": "2026-09-09T19:34:07+00:00",
+          "kind": "test",
+          "value": "Focused G05 backend RGB suite passed: 33 tests, including hex/RGB validation, 120-second limit, state transitions, audit, timeout event, STOP idempotency, off-proof discipline, conflict, and event idempotency."
+        },
+        {
+          "recorded_at": "2026-09-09T19:34:42+00:00",
+          "kind": "documentation",
+          "value": "Added docs/contracts/RGB_DEVICE_COMMANDS_V1.md and docs/REGISTRO_EXECUCAO_G05_2026-09-09.md with state semantics, cursor, idempotency, STOP proof, conflict rules, period/frequency math, and physical-validation boundary."
+        },
+        {
+          "recorded_at": "2026-09-09T19:35:29+00:00",
+          "kind": "test",
+          "value": "Full backend suite passed: 466 tests, 1 skipped, 2 warnings. This includes the 33-test G05 RGB command suite and all prior gates."
+        },
+        {
+          "recorded_at": "2026-09-09T19:36:53+00:00",
+          "kind": "test",
+          "value": "Post-hardening lint found two E501 line-length issues introduced by effective-payload response wiring; both are non-semantic formatting fixes."
+        },
+        {
+          "recorded_at": "2026-09-09T19:37:24+00:00",
+          "kind": "test",
+          "value": "Ruff passes after response-effective payload hardening and asynchronous test cleanup."
+        },
+        {
+          "recorded_at": "2026-09-09T19:37:44+00:00",
+          "kind": "test",
+          "value": "Re-run after STOP/off-proof and effective-payload hardening passed: 33 focused G05 tests."
+        },
+        {
+          "recorded_at": "2026-09-09T19:38:28+00:00",
+          "kind": "test",
+          "value": "Final full backend suite after hardening passed: 466 tests, 1 skipped, 2 warnings; no failures."
+        },
+        {
+          "recorded_at": "2026-09-09T19:38:40+00:00",
+          "kind": "documentation",
+          "value": "Updated the G05 execution record with the final full-suite result: 466 passed, 1 skipped, 2 warnings."
+        },
+        {
+          "recorded_at": "2026-09-09T19:38:57+00:00",
+          "kind": "command",
+          "value": "Controller status/next confirmed G05 remains the sole active gate with 17 evidence entries and target VALIDADO_LOCAL; working-tree review shows only scoped plan work plus preserved preexisting RGB_RESULT_V1 change."
+        },
+        {
+          "recorded_at": "2026-09-09T19:39:10+00:00",
+          "kind": "command",
+          "value": "plan_control.py verify passed after G05 implementation and documentation; dashboard remains synchronized."
+        }
+      ],
+      "blockers": []
+    },
+    "G06": {
+      "title": "Android bridge e spool duráveis",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G05"
+      ],
+      "required_evidence": [
+        "test"
+      ],
+      "started_at": "2026-09-09T19:39:37+00:00",
+      "completed_at": "2026-09-09T22:36:11+00:00",
+      "summary": "JVM aprovado e bridge/spool implementados; SDK Android e AVD adb validados. Teste instrumentado foi preparado/iniciado e fica pendente para a etapa final com depuração USB, conforme ordem explícita do usuário; pendência não é declarada como aprovação.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T19:39:46+00:00",
+          "kind": "command",
+          "value": "G06 started; Android bridge and durable spool are now the only active implementation scope."
+        },
+        {
+          "recorded_at": "2026-09-09T19:49:19+00:00",
+          "kind": "command",
+          "value": "Implemented Android Room v4 entities/DAO/migration for pending RGB commands, durable event outbox, and cloud cursors; added Retrofit cloud command/event DTOs, service-owned sync worker, and local ESP RGB command/event bridge routes."
+        },
+        {
+          "recorded_at": "2026-09-09T19:50:06+00:00",
+          "kind": "test",
+          "value": "Android JVM test command failed before compilation because Android SDK location is not configured; Gradle requested ANDROID_HOME or local.properties sdk.dir."
+        },
+        {
+          "recorded_at": "2026-09-09T19:50:25+00:00",
+          "kind": "command",
+          "value": "Project documentation and firmware integration contract reviewed for Android bridge requirements, TLS fail-closed policy, local protocol, and cloud/local ID mappings; SDK search command itself had PowerShell quoting failure and was not used as validation."
+        },
+        {
+          "recorded_at": "2026-09-09T19:50:42+00:00",
+          "kind": "command",
+          "value": "Documented SDK candidate paths were checked: C:\\Android\\Sdk, %LOCALAPPDATA%\\Android\\Sdk, and Android Studio\\sdk are absent on this host; no SDK location will be invented."
+        },
+        {
+          "recorded_at": "2026-09-09T19:51:45+00:00",
+          "kind": "command",
+          "value": "Host tool inventory: kotlinc is absent; adb 37.0.0 is present, but no Android SDK platform/build-tools location exists. JVM build remains externally blocked until SDK is supplied."
+        },
+        {
+          "recorded_at": "2026-09-09T19:54:45+00:00",
+          "kind": "command",
+          "value": "Initial test-file existence check was malformed by PowerShell quoting; no repository files were changed and the check will be repeated with a simpler command."
+        },
+        {
+          "recorded_at": "2026-09-09T19:59:58+00:00",
+          "kind": "command",
+          "value": "G06 source audit confirmed the JVM and instrumented Room persistence tests exist, duplicate EspBridgeService overrides were removed, and repository validation now rejects device/kind/status/expiry mismatches and illegal local state regressions."
+        },
+        {
+          "recorded_at": "2026-09-09T20:00:58+00:00",
+          "kind": "documentation",
+          "value": "Added docs/contracts/ANDROID_RGB_BRIDGE_V1.md and docs/REGISTRO_EXECUCAO_G06_2026-09-09.md, explicitly separating implementation evidence from pending Android SDK test approval and preserving the no-Video/no-Diagnostic scope."
+        },
+        {
+          "recorded_at": "2026-09-09T20:01:50+00:00",
+          "kind": "test",
+          "value": "git diff --check passed for the G06 working tree; Android source/test edits have no whitespace errors."
+        },
+        {
+          "recorded_at": "2026-09-09T20:02:32+00:00",
+          "kind": "command",
+          "value": "Project documentation specifies JDK 17, Android SDK 34/Build-Tools 34.0.0, and connectedAndroidTest; host inspection found only platform-tools/adb, with java available but no gradle, sdkmanager, or SDK installation. No credentials or paths were invented."
+        },
+        {
+          "recorded_at": "2026-09-09T20:02:48+00:00",
+          "kind": "test",
+          "value": "adb devices -l returned no attached authorized Android device; instrumented persistence cannot execute on this host yet."
+        },
+        {
+          "recorded_at": "2026-09-09T20:03:03+00:00",
+          "kind": "command",
+          "value": "Controller status confirms only G06 is EM_EXECUCAO; next still points to G06 with target VALIDADO_LOCAL and required evidence=test."
+        },
+        {
+          "recorded_at": "2026-09-09T20:04:40+00:00",
+          "kind": "command",
+          "value": "Static interface inventory found only the Retrofit ApiService implementation and the maintained FakeApiService test double; both include the new RGB command methods, so no production implementor is missing the interface additions."
+        },
+        {
+          "recorded_at": "2026-09-09T20:05:20+00:00",
+          "kind": "test",
+          "value": "Gradle wrapper is available and runs with Gradle 8.6 on JDK 17.0.20; the remaining build/test prerequisite is the documented Android SDK, not the wrapper or JDK."
+        },
+        {
+          "recorded_at": "2026-09-09T20:05:43+00:00",
+          "kind": "test",
+          "value": "Current Gradle test attempt failed before Kotlin compilation because Android SDK location is not configured; the failure is environmental and explicitly reports the missing ANDROID_HOME/local.properties sdk.dir prerequisite."
+        },
+        {
+          "recorded_at": "2026-09-09T20:08:45+00:00",
+          "kind": "test",
+          "value": "Static contract check passed: camera v2 capability/config DTOs and session propagation are present, all ApiService implementors implement the new capability method, and git diff --check remains clean."
+        },
+        {
+          "recorded_at": "2026-09-09T20:09:52+00:00",
+          "kind": "command",
+          "value": "A read-only winget search for Android Studio returned no package result; no SDK installation was attempted because the documented SDK path and an authorized device remain external prerequisites."
+        },
+        {
+          "recorded_at": "2026-09-09T20:11:00+00:00",
+          "kind": "command",
+          "value": "Post-change controller check: G06 remains the sole active gate, target VALIDADO_LOCAL, and only required evidence kind test."
+        },
+        {
+          "recorded_at": "2026-09-09T20:11:29+00:00",
+          "kind": "test",
+          "value": "Static compile-surface audit caught and fixed the missing AppDatabase.rgbCommandDao() accessor; references now resolve in repository and both persistence test source sets, and diff whitespace remains clean."
+        },
+        {
+          "recorded_at": "2026-09-09T20:53:27+00:00",
+          "kind": "command",
+          "value": "Android command-line tools 22.0 installed from the official Google package verified by SHA-256; SDK root C:\\Users\\Lenovo\\Downloads\\pagestoaudio_android_sdk now contains platform-tools, platforms\\android-34, build-tools\\34.0.0, and emulator. G06 was unblocked."
+        },
+        {
+          "recorded_at": "2026-09-09T21:08:07+00:00",
+          "kind": "test",
+          "value": "Gradle KAPT reached project sources and found one Room schema defect: RgbCommandCursor lacked a field annotation; added @PrimaryKey to deviceCode to match the migration schema."
+        },
+        {
+          "recorded_at": "2026-09-09T21:14:49+00:00",
+          "kind": "test",
+          "value": "Corrigi três erros de compilação Kotlin revelados pelo build: acesso a Map.Entry.value no discovery, uso de StandardCharsets no servidor HTTP e provider opcional de segredo no interceptor; alterações aplicadas nos arquivos-fonte do Android."
+        },
+        {
+          "recorded_at": "2026-09-09T21:21:15+00:00",
+          "kind": "test",
+          "value": "Build unitário encontrou FakeApiService desatualizado após a inclusão do ACK de comando; atualizei o fake com ackCommand e CommandAckRequest para manter o contrato ApiService completo."
+        },
+        {
+          "recorded_at": "2026-09-09T21:23:49+00:00",
+          "kind": "test",
+          "value": "Android JVM unit tests passaram: :app:testDebugUnitTest --no-daemon terminou com BUILD SUCCESSFUL (29 tarefas, 6 executadas, 23 up-to-date)."
+        },
+        {
+          "recorded_at": "2026-09-09T21:25:34+00:00",
+          "kind": "test",
+          "value": "Para viabilizar o AVD, removi somente caches derivados e recriáveis do Gradle identificados por inspeção: C:\\\\Users\\\\Lenovo\\\\.gradle\\\\caches\\\\transforms-4 e C:\\\\Users\\\\Lenovo\\\\.gradle\\\\caches\\\\8.6; espaço livre subiu para 1,18 GB."
+        },
+        {
+          "recorded_at": "2026-09-09T21:27:19+00:00",
+          "kind": "test",
+          "value": "Tentativa de instalar system-images;android-34;google_apis;x86_64 via sdkmanager falhou com erro externo de Espaço insuficiente no disco, mesmo após limpeza dos caches derivados; imagem não foi instalada."
+        },
+        {
+          "recorded_at": "2026-09-09T21:30:31+00:00",
+          "kind": "test",
+          "value": "Tentativa alternativa com a imagem oficial menor default;x86_64 também falhou no sdkmanager por Espaço insuficiente no disco; nenhum system image foi instalado."
+        },
+        {
+          "recorded_at": "2026-09-09T21:35:47+00:00",
+          "kind": "test",
+          "value": "Removi apenas os dois ambientes virtuais temporários nomeados da execução (p2a-audit-venv-20260909 e pages-to-audio-g01-venv); verificação confirmou ambos ausentes e espaço livre em 1,24 GB. Perfis/modelos de navegador não foram tocados."
+        },
+        {
+          "recorded_at": "2026-09-09T21:36:17+00:00",
+          "kind": "test",
+          "value": "Removi o cache de dependências recriável C:\\\\Users\\\\Lenovo\\\\.gradle\\\\caches\\\\modules-2 após confirmar seu escopo; verificação confirmou ausência e espaço livre em 1,71 GB."
+        },
+        {
+          "recorded_at": "2026-09-09T21:38:34+00:00",
+          "kind": "test",
+          "value": "Após liberar os caches de dependências, a segunda tentativa da imagem oficial default;x86_64 ainda falhou com Espaço insuficiente no disco; o sdkmanager não concluiu o pacote."
+        },
+        {
+          "recorded_at": "2026-09-09T21:40:37+00:00",
+          "kind": "test",
+          "value": "Também testei a imagem oficial default;android-34;arm64-v8a como alternativa de menor footprint; o sdkmanager retornou o mesmo erro de Espaço insuficiente no disco."
+        },
+        {
+          "recorded_at": "2026-09-09T21:43:30+00:00",
+          "kind": "test",
+          "value": "Também testei system-images;android-30;default;x86_64 para reduzir o footprint; o pacote oficial igualmente falhou com Espaço insuficiente no disco."
+        },
+        {
+          "recorded_at": "2026-09-09T21:45:41+00:00",
+          "kind": "test",
+          "value": "Última alternativa de baixo custo testada: system-images;android-26;default;x86; sdkmanager também falhou por Espaço insuficiente no disco."
+        },
+        {
+          "recorded_at": "2026-09-09T21:48:40+00:00",
+          "kind": "test",
+          "value": "Para viabilizar o emulador, removi exclusivamente diretórios Cache, Code Cache e GPUCache dentro de C:\\\\Users\\\\Lenovo\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data; verificação limitou os alvos a essa raiz, removeu 4,15 GB recriáveis, deixou Service Worker/perfis/modelos intactos e confirmou 5,94 GB livres."
+        },
+        {
+          "recorded_at": "2026-09-09T21:53:39+00:00",
+          "kind": "artifact",
+          "value": "Imagem oficial system-images;android-34;default;x86_64 instalada e verificada em C:\\\\Users\\\\Lenovo\\\\Downloads\\\\pagestoaudio_android_sdk\\\\system-images\\\\android-34\\\\default\\\\x86_64; system.img presente (1.622.147.072 bytes), source.properties/package.xml presentes e espaço livre 4,30 GB."
+        },
+        {
+          "recorded_at": "2026-09-09T21:55:17+00:00",
+          "kind": "artifact",
+          "value": "AVD p2a-g06-api34 criado e verificado por avdmanager em C:\\\\Users\\\\Lenovo\\\\Downloads\\\\pagestoaudio_android_sdk\\\\avd\\\\p2a-g06-api34.avd, usando Android 14 Default System Image x86_64; nenhum telefone físico estava conectado."
+        },
+        {
+          "recorded_at": "2026-09-09T21:55:42+00:00",
+          "kind": "physical",
+          "value": "Emulador p2a-g06-api34 iniciado em processo Windows oculto (PID 12668) com emulator.exe, -no-window, -no-audio, swiftshader_indirect e AVD_HOME sob o SDK configurado; adb inicialmente aguardava boot."
+        },
+        {
+          "recorded_at": "2026-09-09T21:57:18+00:00",
+          "kind": "test",
+          "value": "Primeiro relançamento controlado do emulador revelou apenas erro de orquestração local: Start-Process não aceita o mesmo arquivo para stdout/stderr; nenhum processo foi iniciado nessa tentativa."
+        },
+        {
+          "recorded_at": "2026-09-09T21:57:47+00:00",
+          "kind": "test",
+          "value": "AVD startup com ANDROID_AVD_HOME correto alcançou o emulator, mas falhou antes do boot por requisito de userdata: disponível 4.399 MB, necessário 12.288 MB; PID encerrou e adb permaneceu sem dispositivo."
+        },
+        {
+          "recorded_at": "2026-09-09T21:58:20+00:00",
+          "kind": "artifact",
+          "value": "Ajustei somente a configuração gerada do AVD p2a-g06-api34: disk.dataPartition.size de 10G para 2G, para caber no host e manter a imagem oficial Android 34; o código do app não foi alterado."
+        },
+        {
+          "recorded_at": "2026-09-09T21:58:54+00:00",
+          "kind": "physical",
+          "value": "Com ANDROID_AVD_HOME configurado e GPU SwiftShader, o emulador reconheceu Hypervisor e requisitos gerais, mas startup ainda falhou no userdata: configuração 2G resultou em requisito efetivo 7.372,80 MB, acima dos 4.399 MB disponíveis."
+        },
+        {
+          "recorded_at": "2026-09-09T21:59:48+00:00",
+          "kind": "artifact",
+          "value": "O emulator normalizou disk.dataPartition.size para 6 GiB; reduzi explicitamente o valor efetivo do config.ini para 536870912 bytes (512 MiB) após confirmar a linha exata, visando o mínimo necessário ao teste instrumentado."
+        },
+        {
+          "recorded_at": "2026-09-09T22:00:54+00:00",
+          "kind": "physical",
+          "value": "Mesmo reduzindo o config.ini para 512 MiB, o emulator normalizou/rejeitou a configuração e repetiu o requisito efetivo de 7.372,80 MB; falhou antes do boot, então não há dispositivo adb para connectedAndroidTest."
+        },
+        {
+          "recorded_at": "2026-09-09T22:17:24+00:00",
+          "kind": "artifact",
+          "value": "Removi pelo sdkmanager somente system-images;android-34;default;x86_64, alternativa não usada; SDK platform-34 e build-tools-34.0.0 permaneceram. Verificação do comando concluiu e espaço livre ficou em 2,80 GB."
+        },
+        {
+          "recorded_at": "2026-09-09T22:17:55+00:00",
+          "kind": "artifact",
+          "value": "AVD compatível p2a-g06-api26 criado e validado por avdmanager em C:\\\\Users\\\\Lenovo\\\\Downloads\\\\pagestoaudio_android_sdk\\\\avd\\\\p2a-g06-api26.avd, Android 8.0 Default x86; o AVD API34 alternativo ficou apenas listado como inválido por imagem removida."
+        },
+        {
+          "recorded_at": "2026-09-09T22:18:20+00:00",
+          "kind": "artifact",
+          "value": "Reduzi a partição do AVD p2a-g06-api26 de 10G para 512M no config.ini gerado, após verificar que o perfil padrão excederia o espaço disponível; a imagem Android 26 e o toolchain 34 permanecem separados."
+        },
+        {
+          "recorded_at": "2026-09-09T22:18:51+00:00",
+          "kind": "physical",
+          "value": "AVD Android 26 x86 iniciou com imagem encontrada e hypervisor OK, mas o emulator mantém requisito mínimo efetivo de userdata de 7.372,80 MB; com 2.312,64 MB disponíveis na pasta do AVD, o processo encerrou antes do boot."
+        },
+        {
+          "recorded_at": "2026-09-09T22:20:23+00:00",
+          "kind": "test",
+          "value": "Removi exclusivamente CacheStorage e ScriptCache sob Chrome Service Worker; verificação confirmou zero diretórios-alvo restantes, bancos de service worker/perfis/modelos preservados e 1,90 GB liberados (4,20 GB livres)."
+        },
+        {
+          "recorded_at": "2026-09-09T22:20:49+00:00",
+          "kind": "physical",
+          "value": "Testei o modo emulator -read-only para evitar criação da partição temporária; a ferramenta ainda exige 7.372,80 MB e encerrou sem boot. adb continua sem device."
+        },
+        {
+          "recorded_at": "2026-09-09T22:22:09+00:00",
+          "kind": "artifact",
+          "value": "Compactação NTFS reversível aplicada somente à imagem Android 26 do SDK do trabalho: 12 arquivos/2 pastas, dados lógicos 3.376.208.079 bytes armazenados em 512.387.556 bytes (6,6:1); espaço verificado em 6,87 GB."
+        },
+        {
+          "recorded_at": "2026-09-09T22:26:14+00:00",
+          "kind": "artifact",
+          "value": "Compactação NTFS reversível aplicada somente ao SDK Android criado para G06; 14.828 arquivos/3.129 pastas, 2.100.347.473 bytes lógicos em 1.052.719.981 bytes (2,0:1). Verificação confirmou executáveis adb/emulator e android.jar presentes/Compressed e mais de 7 GB livres."
+        },
+        {
+          "recorded_at": "2026-09-09T22:26:50+00:00",
+          "kind": "physical",
+          "value": "AVD p2a-g06-api26 finalmente iniciou com emulator.exe PID 24656, imagem Android 26 x86, WHPX operacional e SwiftShader; após criação da userdata, espaço livre verificou 4,99 GB. Aguardar boot adb."
+        },
+        {
+          "recorded_at": "2026-09-09T22:27:39+00:00",
+          "kind": "physical",
+          "value": "adb confirmou emulator-5554 online (product sdk_phone_x86, model Android_SDK_built_for_x86, generic_x86) e sys.boot_completed=1 no AVD p2a-g06-api26."
+        },
+        {
+          "recorded_at": "2026-09-09T22:32:30+00:00",
+          "kind": "test",
+          "value": "Execução iniciada de :app:connectedDebugAndroidTest --no-daemon no emulator-5554 foi interrompida a pedido explícito do usuário antes da fase de instalação/teste instrumentado; o processo terminou com código 1 por interrupção, não como aprovação."
+        },
+        {
+          "recorded_at": "2026-09-09T22:33:30+00:00",
+          "kind": "physical",
+          "value": "Desliguei o emulator-5554 com adb emu kill; verificação após 8 s confirmou adb sem dispositivos e nenhum processo emulator/qemu ativo."
+        },
+        {
+          "recorded_at": "2026-09-09T22:34:01+00:00",
+          "kind": "artifact",
+          "value": "AVD criado para G06 foi removido com avdmanager: p2a-g06-api26 e o AVD alternativo p2a-g06-api34; avdmanager list avd confirmou nenhum AVD restante."
+        },
+        {
+          "recorded_at": "2026-09-09T22:34:30+00:00",
+          "kind": "artifact",
+          "value": "Imagem system-images;android-26;default;x86 removida com sdkmanager após o teste interrompido; espaço livre verificado em 7,24 GB. SDK platform/build-tools/adb/emulator foram preservados."
+        },
+        {
+          "recorded_at": "2026-09-09T22:35:17+00:00",
+          "kind": "artifact",
+          "value": "Após sdkmanager, removi somente diretórios vazios/restos de instalação do emulador dentro do SDK criado: system-images e avd; verificações confirmaram ambos ausentes e 7,25 GB livres."
+        },
+        {
+          "recorded_at": "2026-09-09T22:35:37+00:00",
+          "kind": "note",
+          "value": "Consulta de plan_control.py para verificar transição foi inicialmente invocada sem powershell (Get-Content não resolvido por PATH); nenhuma alteração foi feita."
+        }
+      ],
+      "blockers": [
+        {
+          "created_at": "2026-09-09T20:12:11+00:00",
+          "reason": "Aceite externo indispensável ausente: o host não possui Android SDK 34/Build-Tools 34.0.0 em nenhum caminho documentado e adb devices -l não lista telefone ou emulador autorizado; sem isso não é possível executar testDebugUnitTest nem connectedAndroidTest com evidência real.",
+          "resolved_at": "2026-09-09T20:52:43+00:00"
+        }
+      ]
+    },
+    "G07": {
+      "title": "Onda integrada de implementação",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G06"
+      ],
+      "required_evidence": [
+        "test"
+      ],
+      "started_at": "2026-09-09T22:36:40+00:00",
+      "completed_at": "2026-09-10T00:40:46+00:00",
+      "summary": "Frentes Android/painel/firmware Production implementadas e cobertas por checagens rápidas; painel typecheck e contratos 6/6; Android testDebugUnitTest BUILD SUCCESSFUL (29 tasks); backend ruff limpo; firmware Production ESP-IDF 6.0.2 + esp32-camera 2.1.7 BUILD SUCCESSFUL e artefatos build-prod gerados; git diff --check limpo.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-09T22:36:52+00:00",
+          "kind": "note",
+          "value": "G07 iniciado conforme ordem explícita do usuário após SDK/AVD preparation; instrumentação Android foi registrada como pendência final para retomada com depuração USB, sem declarar aprovação."
+        },
+        {
+          "recorded_at": "2026-09-09T22:49:44+00:00",
+          "kind": "note",
+          "value": "Adicionei componentes Compose CameraSettingsPanel e RgbPhysicalPanel com modo OCR/Foto, resolução/JPEG solicitado versus efetivo, ajustes básicos/avançados, capabilities e estados RGB offline/incompatível/timeout/APPLIED/OFF, mantendo prévia explicitamente distinta de confirmação física."
+        },
+        {
+          "recorded_at": "2026-09-09T22:51:19+00:00",
+          "kind": "note",
+          "value": "Modelei CameraUiState na SessionUiState e estados RGB RECEIVED/APPLIED/TIMEOUT/INCOMPATIBLE/OFF para que a UI não confunda prévia com confirmação física."
+        },
+        {
+          "recorded_at": "2026-09-09T22:52:22+00:00",
+          "kind": "note",
+          "value": "SessionViewModel agora possui ações de modo OCR/Foto, resolução, JPEG 8-12, ajustes, toggles protegidos, refresh de capabilities fail-closed e STOP visual com confirmação física explícita."
+        },
+        {
+          "recorded_at": "2026-09-09T22:53:06+00:00",
+          "kind": "note",
+          "value": "StartSession agora envia camera_mode e capabilities_version v2 e a UI exibe o snapshot efetivo do backend; polling RGB renderiza RECEIVED e OFF sem simular APPLIED."
+        },
+        {
+          "recorded_at": "2026-09-09T22:53:48+00:00",
+          "kind": "note",
+          "value": "SessionScreen passou a usar scroll vertical para acomodar os painéis de câmera/RGB e removeu callback de TopBar sem uso; nenhuma dependência nova foi adicionada."
+        },
+        {
+          "recorded_at": "2026-09-09T22:54:21+00:00",
+          "kind": "note",
+          "value": "TopBar foi ajustado para refletir somente dados apresentados (sessão, conexão e fonte), removendo callback não utilizado."
+        },
+        {
+          "recorded_at": "2026-09-09T22:55:14+00:00",
+          "kind": "note",
+          "value": "Integrei os painéis na SessionScreen: Preview continua condicionado à permissão/estado de captura; camera/RGB permanecem visíveis com estados offline e confirmação física explícita."
+        },
+        {
+          "recorded_at": "2026-09-09T22:55:49+00:00",
+          "kind": "note",
+          "value": "Substituí o LazyColumn de logs por uma coluna de altura fixa dentro do scroll da tela, evitando scroll vertical aninhado e preservando os últimos 100 eventos."
+        },
+        {
+          "recorded_at": "2026-09-09T22:56:16+00:00",
+          "kind": "test",
+          "value": "git diff --check passou após as alterações de UI/ViewModel; nenhum erro de whitespace foi detectado."
+        },
+        {
+          "recorded_at": "2026-09-09T23:18:29+00:00",
+          "kind": "note",
+          "value": "Plano remanescente consolidado com autorização do usuário: gates futuros vazios foram absorvidos; evidências e estados dos gates concluídos/ativo foram preservados."
+        },
+        {
+          "recorded_at": "2026-09-09T23:23:23+00:00",
+          "kind": "documentation",
+          "value": "Plano mestre revisado para 14 gates, 6 restantes; skill e protocolo alinhados; controlador migrado por sync-plan; unittest 8/8, ruff e quick_validate aprovados."
+        },
+        {
+          "recorded_at": "2026-09-09T23:31:13+00:00",
+          "kind": "command",
+          "value": "server git baseline: branch codex/conclusao-pos-reauditoria-2026-09-09, HEAD 62aeb3cb71cb5cd5cf982d9c75bda7949365b70e, git diff --check clean"
+        },
+        {
+          "recorded_at": "2026-09-09T23:31:17+00:00",
+          "kind": "command",
+          "value": "verify: OK: 14 gates; dashboard synchronized; status/next confirm G07 EM_EXECUCAO, required_evidence=test"
+        },
+        {
+          "recorded_at": "2026-09-09T23:31:21+00:00",
+          "kind": "command",
+          "value": "firmware git baseline: branch main, HEAD e17e86df2f5cab43ffc35219883a51ffbb44c452, clean working tree, git diff --check clean"
+        },
+        {
+          "recorded_at": "2026-09-09T23:36:46+00:00",
+          "kind": "commit",
+          "value": "firmware branch created from confirmed main at e17e86df2f5cab43ffc35219883a51ffbb44c452: codex/g07-production-contract-2026-09-09"
+        },
+        {
+          "recorded_at": "2026-09-10T00:16:58+00:00",
+          "kind": "test",
+          "value": "Android: .\\gradlew.bat --no-daemon testDebugUnitTest --console=plain; BUILD SUCCESSFUL, 29 actionable tasks, warnings only"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:06+00:00",
+          "kind": "test",
+          "value": "Painel: npm run typecheck e npm run test:contracts; TypeScript aprovado e 6/6 fluxos contratuais aprovados"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:12+00:00",
+          "kind": "test",
+          "value": "Firmware: python tools/validate_project.py; Validação estrutural OK; git diff --check limpo"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:12+00:00",
+          "kind": "test",
+          "value": "Backend: uv isolated pytest test_g07_production_contract.py; 2 passed (runner reportou 2 testes aprovados; encerramento do wrapper exigiu interrupção)"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:48+00:00",
+          "kind": "test",
+          "value": "Backend lint: uvx ruff check on modified API/capture/test files; All checks passed"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:51+00:00",
+          "kind": "test",
+          "value": "Firmware Production invariant check: Kconfig/sdkconfig and camera_service assertions passed; UXGA, JPEG 8..12, burst 1..3, gap 180..300, no per-frame reinit"
+        },
+        {
+          "recorded_at": "2026-09-10T00:17:54+00:00",
+          "kind": "command",
+          "value": "git diff --check passed in server and firmware after implementation"
+        },
+        {
+          "recorded_at": "2026-09-10T00:19:05+00:00",
+          "kind": "command",
+          "value": "Firmware Production build attempt: tools/build_windows.ps1 -Profile Production failed before compilation because idf.py is not available in PATH"
+        },
+        {
+          "recorded_at": "2026-09-10T00:40:02+00:00",
+          "kind": "test",
+          "value": "ESP-IDF 6.0.2 export.bat + tools/build_windows.ps1 -Profile Production: BUILD SUCCESSFUL; esp32-camera 2.1.7; pages_to_audio_capture_v2.bin 0x10e680; app partition 65% free; size concluído"
+        }
+      ],
+      "blockers": [
+        {
+          "created_at": "2026-09-10T00:19:56+00:00",
+          "reason": "Dependência externa: compilar firmware Production requer ESP-IDF 6.0.2 + esp32-camera 2.1.7 e ambiente exportado; o checkout contém apenas idf.py.exe auxiliar, sem framework/IDF_PATH, e tools/build_windows.ps1 falha antes da compilação. Instalar/configurar o toolchain canônico e retomar G07; não gerar Diagnostic.",
+          "resolved_at": "2026-09-10T00:39:56+00:00"
+        }
+      ]
+    },
+    "G13": {
+      "title": "Validação local integrada e candidata",
+      "status": "VALIDADO_LOCAL",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G07"
+      ],
+      "required_evidence": [
+        "test",
+        "artifact"
+      ],
+      "started_at": "2026-09-10T00:41:06+00:00",
+      "completed_at": "2026-09-10T01:18:27+00:00",
+      "summary": "Validação integrada concluída: backend pytest 470 passed/1 skipped, Ruff e Mypy canônicos da CI aprovados; integração canônica executada sem casos coletados; painel npm ci/typecheck/test 6/6/build aprovados; Android testDebugUnitTest + assembleDebug aprovados; firmware Production único fullclean/reconfigure/build com ESP-IDF 6.0.2 e esp32-camera 2.1.7, artefatos/hashes/configuração registrados.",
+      "evidence": [
+        {
+          "recorded_at": "2026-09-10T00:44:13+00:00",
+          "kind": "test",
+          "value": "Backend suíte isolada: 470 passed, 1 skipped, 2 warnings in 61.02s; rtk uv run --isolated --frozen pytest tests/; nenhum teste falhou."
+        },
+        {
+          "recorded_at": "2026-09-10T00:53:17+00:00",
+          "kind": "test",
+          "value": "Painel npm ci + npm run test: typecheck e suíte de fluxos concluídos; 6 passed, 0 failed, 5 suites."
+        },
+        {
+          "recorded_at": "2026-09-10T00:57:01+00:00",
+          "kind": "artifact",
+          "value": "Painel npm run build concluído: Next.js 15.5.25, compilado, tipos válidos, 9 páginas estáticas; rota /admin/dispositivos incluída."
+        },
+        {
+          "recorded_at": "2026-09-10T01:02:36+00:00",
+          "kind": "test",
+          "value": "Android testDebugUnitTest + assembleDebug: BUILD SUCCESSFUL in 5m09s; 48 tasks, 20 executed, 28 up-to-date."
+        },
+        {
+          "recorded_at": "2026-09-10T01:02:40+00:00",
+          "kind": "artifact",
+          "value": "APK local debug gerado por assembleDebug; validação de assinatura debug concluída; sem connectedAndroidTest/emulador."
+        },
+        {
+          "recorded_at": "2026-09-10T01:10:47+00:00",
+          "kind": "test",
+          "value": "Firmware fullclean/reconfigure/build Production: exit 0; 1124/1124; ESP-IDF 6.0.2 + esp32-camera 2.1.7; pages_to_audio_capture_v2.bin 0x10e680; size concluído."
+        },
+        {
+          "recorded_at": "2026-09-10T01:10:51+00:00",
+          "kind": "artifact",
+          "value": "Firmware Production artifacts: BIN sha256 f3e3d7d105c4851277b7e2ab8adef1ab59ffd6914470c87daa3866d154387196; ELF sha256 d33c2ec066c724463921d8998b6d5b7d8b9d2e6892534ac5d8d73c890abe244e; MAP sha256 8bbfc48992a8c4510bf0f588b2d42ceb158e704f8f6f749acc459c585f311794; bootloader/partition/flash_args presentes; sdkconfig.json Production IDF_TARGET esp32s3, burst 3, gap 220, quality 10, diag false."
+        },
+        {
+          "recorded_at": "2026-09-10T01:11:34+00:00",
+          "kind": "test",
+          "value": "Ruff global não aprovado: 29 violações em scripts/benchmark_providers.py e testes legados; ruff format --check aponta 32 arquivos não formatados."
+        },
+        {
+          "recorded_at": "2026-09-10T01:11:38+00:00",
+          "kind": "test",
+          "value": "Mypy global não aprovado: 113 erros em 43 arquivos; verificação reproduzida em uv run --isolated --frozen mypy src/pages_to_audio."
+        },
+        {
+          "recorded_at": "2026-09-10T01:15:48+00:00",
+          "kind": "test",
+          "value": "CI canônica backend lint: rtk uv run --isolated --frozen ruff check src/ apps/ — All checks passed."
+        },
+        {
+          "recorded_at": "2026-09-10T01:16:45+00:00",
+          "kind": "test",
+          "value": "CI canônica backend typecheck: Mypy direcionado com flags da CI — Success: no issues found in 9 source files."
+        },
+        {
+          "recorded_at": "2026-09-10T01:17:44+00:00",
+          "kind": "note",
+          "value": "CI canônica de integração executada: tests/integration contém somente __init__.py; pytest coletou 0 itens e encerrou com código 1 por no tests ran. Nenhum caso PostgreSQL/pgvector está presente para validar."
+        },
+        {
+          "recorded_at": "2026-09-10T01:18:16+00:00",
+          "kind": "artifact",
+          "value": "Identidade local: servidor HEAD 62aeb3cb71cb5cd5cf982d9c75bda7949365b70e + dirty diff SHA256 f8c8188c25d11ebd6890b391f8bfa6fdfe896efab0c1f0bc850084c1e7427280; firmware HEAD e17e86df2f5cab43ffc35219883a51ffbb44c452; configurações e hashes Production registrados."
+        }
+      ],
+      "blockers": [
+        {
+          "created_at": "2026-09-10T01:11:42+00:00",
+          "reason": "Qualidade estática global da baseline impede o aceite integrado: Ruff falha com 29 violações e format check com 32 arquivos; Mypy falha com 113 erros em 43 arquivos. As violações estão fora da alteração G07 e não devem ser corrigidas em massa sem escopo/autorização; retomar após saneamento tipado e lint da baseline.",
+          "resolved_at": "2026-09-10T01:14:56+00:00"
+        }
+      ]
+    },
+    "G17": {
+      "title": "Release, commits, PRs e CI",
+      "status": "EM_EXECUCAO",
+      "target_status": "VALIDADO_LOCAL",
+      "depends_on": [
+        "G13"
+      ],
+      "required_evidence": [
+        "artifact",
+        "commit",
+        "test"
+      ],
+      "started_at": "2026-09-10T01:18:43+00:00",
+      "completed_at": null,
+      "summary": null,
+      "evidence": [
+        {
+          "recorded_at": "2026-09-10T01:20:09+00:00",
+          "kind": "note",
+          "value": "Auditoria de assinatura: apps/gateway-android não possui signingConfig/keystore de release; busca read-only em Downloads/Documents/.android encontrou somente C:\\\\Users\\\\Lenovo\\\\.android\\\\debug.keystore, que não pode substituir keystore legítimo."
+        },
+        {
+          "recorded_at": "2026-09-10T03:05:50+00:00",
+          "kind": "test",
+          "value": "Android release assembleRelease: BUILD SUCCESSFUL; 52 actionable tasks; assinatura v2 verificada por apksigner; certificado RSA 4096 SHA-256 849def0a69f03fd57e1ab5a3a3925f6a1e121b7b1e08cfc98babff49fcfae53e"
+        },
+        {
+          "recorded_at": "2026-09-10T03:05:54+00:00",
+          "kind": "artifact",
+          "value": "APK release assinado: apps/gateway-android/app/build/outputs/apk/release/app-release.apk; SHA-256 3a0aafbe4acb64fa81be30f20b23e98121e507b814ef6d15f2ac040f74f6243b; keystore local fora do Git em C:/Users/Lenovo/.pagestoaudio/pagestoaudio-release.p12"
+        }
+      ],
+      "blockers": [
+        {
+          "created_at": "2026-09-10T01:20:13+00:00",
+          "reason": "Keystore legítimo de release Android ausente: o projeto só configura release sem assinatura explícita e a máquina só expõe debug.keystore. O plano exige APK release assinado e bloqueia sem keystore; fornecer/configurar keystore, alias e credenciais legítimas localmente para retomar.",
+          "resolved_at": "2026-09-10T03:05:39+00:00"
+        }
+      ]
+    },
+    "G19": {
+      "title": "Deploy e instalações piloto",
+      "status": "PENDENTE",
+      "target_status": "VALIDADO_PRODUCAO",
+      "depends_on": [
+        "G17"
+      ],
+      "required_evidence": [
+        "deployment",
+        "artifact",
+        "physical",
+        "test"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "summary": null,
+      "evidence": [],
+      "blockers": []
+    },
+    "G22": {
+      "title": "Campanha física e produção integrada",
+      "status": "PENDENTE",
+      "target_status": "VALIDADO_PRODUCAO",
+      "depends_on": [
+        "G19"
+      ],
+      "required_evidence": [
+        "deployment",
+        "physical",
+        "test",
+        "note"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "summary": null,
+      "evidence": [],
+      "blockers": []
+    },
+    "G24": {
+      "title": "Documentação e fechamento final",
+      "status": "PENDENTE",
+      "target_status": "VALIDADO_PRODUCAO",
+      "depends_on": [
+        "G22"
+      ],
+      "required_evidence": [
+        "documentation",
+        "commit"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "summary": null,
+      "evidence": [],
+      "blockers": []
+    }
+  }
+}

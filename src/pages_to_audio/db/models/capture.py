@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Integer,
@@ -13,7 +14,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.pages_to_audio.db.base import Base
@@ -48,8 +49,35 @@ class Capture(Base):
     capture_source: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'ANDROID_CAMERA'")
     )
-    session_type: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'EXAM'")
+    session_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'EXAM'"))
+    camera_profile_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("camera_profile_revisions.id", ondelete="RESTRICT"),
+        nullable=True,
     )
+    camera_profile_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    requested_camera_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    effective_camera_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capabilities_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requested_resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_esp_jpeg_quality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_esp_jpeg_quality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    configured_buffer_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    dma_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    expected_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    capture_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    upload_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    fb_overflow: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    dma_overflow: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    watchdog_reset: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)

@@ -3,6 +3,7 @@ from src.pages_to_audio.db.models.answer_attempt import AnswerAttempt
 from src.pages_to_audio.db.models.audio_artifact import AudioArtifact
 from src.pages_to_audio.db.models.audit_event import AuditEvent
 from src.pages_to_audio.db.models.camera_diagnostic import CameraDiagnostic, CameraDiagnosticFrame
+from src.pages_to_audio.db.models.camera_profile_revision import CameraProfileRevision
 from src.pages_to_audio.db.models.capture import Capture
 from src.pages_to_audio.db.models.device import Device
 from src.pages_to_audio.db.models.final_answer import FinalAnswer
@@ -18,6 +19,8 @@ from src.pages_to_audio.db.models.logical_page_frame import LogicalPageFrame
 from src.pages_to_audio.db.models.ocr_run import OCRRun
 from src.pages_to_audio.db.models.question import Question
 from src.pages_to_audio.db.models.retrieval_run import RetrievalRun
+from src.pages_to_audio.db.models.rgb_device_command import RgbDeviceCommand
+from src.pages_to_audio.db.models.rgb_device_command_event import RgbDeviceCommandEvent
 from src.pages_to_audio.db.models.rgb_sequence import RgbSequence
 from src.pages_to_audio.db.models.rgb_sequence_event import RgbSequenceEvent
 from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
@@ -34,6 +37,7 @@ __all__ = [
     "AuditEvent",
     "CameraDiagnostic",
     "CameraDiagnosticFrame",
+    "CameraProfileRevision",
     "Capture",
     "Device",
     "FinalAnswer",
@@ -48,6 +52,8 @@ __all__ = [
     "OCRRun",
     "Question",
     "RetrievalRun",
+    "RgbDeviceCommand",
+    "RgbDeviceCommandEvent",
     "RgbSequence",
     "RgbSequenceEvent",
     "RgbTestCommand",

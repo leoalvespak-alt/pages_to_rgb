@@ -65,9 +65,17 @@ class Session(Base):
     capture_source: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'ANDROID_CAMERA'")
     )
-    session_type: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'EXAM'")
+    session_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'EXAM'"))
+    camera_profile_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("camera_profile_revisions.id", ondelete="RESTRICT"),
+        nullable=True,
     )
+    camera_profile_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    requested_camera_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    effective_camera_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capabilities_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=func.now(), onupdate=func.now()
