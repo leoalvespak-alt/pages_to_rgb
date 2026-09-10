@@ -2,7 +2,7 @@
 
 > Gerado por scripts/plan_control.py. Não editar manualmente.
 
-- Atualizado em: 2026-09-10T03:05:54+00:00
+- Atualizado em: 2026-09-10T03:25:11+00:00
 - Progresso: **10/14 gates**
 - Próximo gate: **G17**
 
@@ -20,7 +20,7 @@
 | 8 | G06 | VALIDADO_LOCAL | VALIDADO_LOCAL | Android bridge e spool duráveis | 60 |
 | 9 | G07 | VALIDADO_LOCAL | VALIDADO_LOCAL | Onda integrada de implementação | 25 |
 | 10 | G13 | VALIDADO_LOCAL | VALIDADO_LOCAL | Validação local integrada e candidata | 13 |
-| 11 | G17 | EM_EXECUCAO | VALIDADO_LOCAL | Release, commits, PRs e CI | 3 |
+| 11 | G17 | EM_EXECUCAO | VALIDADO_LOCAL | Release, commits, PRs e CI | 17 |
 | 12 | G19 | PENDENTE | VALIDADO_PRODUCAO | Deploy e instalações piloto | 0 |
 | 13 | G22 | PENDENTE | VALIDADO_PRODUCAO | Campanha física e produção integrada | 0 |
 | 14 | G24 | PENDENTE | VALIDADO_PRODUCAO | Documentação e fechamento final | 0 |

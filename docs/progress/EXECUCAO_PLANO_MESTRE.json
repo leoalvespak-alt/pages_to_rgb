@@ -2,7 +2,7 @@
   "schema_version": 1,
   "plan": "docs/PLANO_MESTRE_PRODUCAO_CAMERA_RGB_2026-09-09.md",
   "created_at": "2026-09-09T17:39:04+00:00",
-  "updated_at": "2026-09-10T03:05:54+00:00",
+  "updated_at": "2026-09-10T03:25:11+00:00",
   "workflow": [
     "G00-A",
     "G09",
@@ -1202,6 +1202,76 @@
           "recorded_at": "2026-09-10T03:05:54+00:00",
           "kind": "artifact",
           "value": "APK release assinado: apps/gateway-android/app/build/outputs/apk/release/app-release.apk; SHA-256 3a0aafbe4acb64fa81be30f20b23e98121e507b814ef6d15f2ac040f74f6243b; keystore local fora do Git em C:/Users/Lenovo/.pagestoaudio/pagestoaudio-release.p12"
+        },
+        {
+          "recorded_at": "2026-09-10T03:07:08+00:00",
+          "kind": "commit",
+          "value": "Server commit ec1f66b: feat: complete production RGB capture workflow; branch codex/conclusao-pos-reauditoria-2026-09-09"
+        },
+        {
+          "recorded_at": "2026-09-10T03:07:13+00:00",
+          "kind": "commit",
+          "value": "Firmware commit 3772921: feat: enforce production camera capture contract; branch codex/g07-production-contract-2026-09-09"
+        },
+        {
+          "recorded_at": "2026-09-10T03:07:18+00:00",
+          "kind": "artifact",
+          "value": "Firmware Production candidate from G13 retained: pages_to_audio_capture_v2.bin SHA-256 f3e3d7d105c4851277b7e2ab8adef1ab59ffd6914470c87daa3866d154387196; ESP-IDF C:/esp/v6.0.2/esp-idf; target esp32s3"
+        },
+        {
+          "recorded_at": "2026-09-10T03:09:44+00:00",
+          "kind": "test",
+          "value": "Canonical Android CI debug testDebugUnitTest + assembleDebug without release credentials: BUILD SUCCESSFUL; 48 actionable tasks"
+        },
+        {
+          "recorded_at": "2026-09-10T03:10:49+00:00",
+          "kind": "test",
+          "value": "Release Android revalidado após ajuste de validação condicional: assembleRelease BUILD SUCCESSFUL; apksigner v2 true; RSA 4096; certificado 849def0a69f03fd57e1ab5a3a3925f6a1e121b7b1e08cfc98babff49fcfae53e"
+        },
+        {
+          "recorded_at": "2026-09-10T03:10:53+00:00",
+          "kind": "artifact",
+          "value": "APK release final SHA-256 3a0aafbe4acb64fa81be30f20b23e98121e507b814ef6d15f2ac040f74f6243b"
+        },
+        {
+          "recorded_at": "2026-09-10T03:14:37+00:00",
+          "kind": "test",
+          "value": "Backend canonical Ruff src/apps passed: All checks passed"
+        },
+        {
+          "recorded_at": "2026-09-10T03:14:41+00:00",
+          "kind": "test",
+          "value": "Backend targeted Mypy passed: no issues in 9 source files"
+        },
+        {
+          "recorded_at": "2026-09-10T03:14:45+00:00",
+          "kind": "test",
+          "value": "Backend unit suite with PYTHONPATH=repo-root: 146 passed, 317 deselected, 1 warning in 28.98s"
+        },
+        {
+          "recorded_at": "2026-09-10T03:14:48+00:00",
+          "kind": "note",
+          "value": "Isolated unit invocation without PYTHONPATH had 4 collection imports for apps/src; canonical unit rerun with repository root on PYTHONPATH passed; no code failure."
+        },
+        {
+          "recorded_at": "2026-09-10T03:18:10+00:00",
+          "kind": "test",
+          "value": "Panel npm ci passed: 357 packages, 358 audited, 0 vulnerabilities"
+        },
+        {
+          "recorded_at": "2026-09-10T03:18:33+00:00",
+          "kind": "test",
+          "value": "Panel npm run test passed: typecheck plus 6 tests, 0 failures"
+        },
+        {
+          "recorded_at": "2026-09-10T03:23:59+00:00",
+          "kind": "artifact",
+          "value": "Panel production build passed: Next.js 15.5.25; 9 static pages; /admin/dispositivos included"
+        },
+        {
+          "recorded_at": "2026-09-10T03:25:11+00:00",
+          "kind": "note",
+          "value": "Canonical integration command collected 0 tests and exited 1 because tests/integration contains no runnable integration cases; unit/backend/panel/Android/firmware checks passed. No failure was masked."
         }
       ],
       "blockers": [
