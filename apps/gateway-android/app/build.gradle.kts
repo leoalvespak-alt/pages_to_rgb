@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,6 +18,31 @@ val releaseSigningConfigured = listOf(
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+// Gateway credentials are provisioned at build time and must never be committed.
+// Environment variables take precedence; local.properties is an ignored fallback.
+val gatewayLocalProperties = Properties().also { properties ->
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.isFile) {
+        localPropertiesFile.inputStream().use { properties.load(it) }
+    }
+}
+
+fun gatewaySetting(environmentName: String, propertyName: String): String =
+    System.getenv(environmentName)?.takeIf { it.isNotBlank() }
+        ?: gatewayLocalProperties.getProperty(propertyName, "")
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\""
+
+val gatewayBaseUrl = gatewaySetting("P2A_GATEWAY_BASE_URL", "gateway.baseUrl")
+    .ifBlank { "https://ptr.rotadeataque.com.br/api/v1/" }
+val gatewayDeviceId = gatewaySetting("P2A_GATEWAY_DEVICE_ID", "gateway.deviceId")
+    .ifBlank { "GW-ANDROID-001" }
+val gatewayId = gatewaySetting("P2A_GATEWAY_ID", "gateway.gatewayId")
+    .ifBlank { gatewayDeviceId }
+val gatewaySecret = gatewaySetting("P2A_GATEWAY_SECRET", "gateway.gatewaySecret")
+    .ifBlank { gatewaySetting("P2A_GATEWAY_DEVICE_SECRET", "gateway.deviceSecret") }
+
 android {
     namespace = "com.pagestoaudio.gateway"
     compileSdk = 34
@@ -26,6 +53,11 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "1.0.1"
+
+        buildConfigField("String", "GATEWAY_BASE_URL", buildConfigString(gatewayBaseUrl))
+        buildConfigField("String", "GATEWAY_DEVICE_ID", buildConfigString(gatewayDeviceId))
+        buildConfigField("String", "GATEWAY_ID", buildConfigString(gatewayId))
+        buildConfigField("String", "GATEWAY_SECRET", buildConfigString(gatewaySecret))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

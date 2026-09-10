@@ -1,5 +1,7 @@
 package com.pagestoaudio.gateway.domain
 
+import com.pagestoaudio.gateway.BuildConfig
+
 /**
  * Configuração do Gateway — base URL, identidades cloud/local e tuning.
  *
@@ -40,8 +42,15 @@ data class GatewayConfig(
         fun isValidEspId(value: String): Boolean = ESP_ID_RE.matches(value)
 
         fun fromEnv(): GatewayConfig {
-            // Em build real, ler de BuildConfig ou DataStore
-            return GatewayConfig()
+            // BuildConfig is generated from process-local build inputs. Release
+            // builds receive the real gateway token through P2A_GATEWAY_SECRET;
+            // no credential is stored in source control.
+            return GatewayConfig(
+                baseUrl = BuildConfig.GATEWAY_BASE_URL,
+                deviceId = BuildConfig.GATEWAY_DEVICE_ID,
+                gatewayId = BuildConfig.GATEWAY_ID.ifBlank { BuildConfig.GATEWAY_DEVICE_ID },
+                gatewaySecret = BuildConfig.GATEWAY_SECRET.ifBlank { null },
+            )
         }
     }
 }
