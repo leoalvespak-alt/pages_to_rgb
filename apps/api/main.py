@@ -58,6 +58,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.get(f"{API_V1_PREFIX}/", tags=["meta"])
+    async def api_root() -> dict[str, str]:
+        """Human-readable entry point for the versioned API base URL."""
+        return {
+            "service": "pages-to-rgb-api",
+            "status": "ok",
+            "docs": "/docs",
+            "admin": "/admin/login",
+        }
+
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,

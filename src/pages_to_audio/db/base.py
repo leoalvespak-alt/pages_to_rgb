@@ -1,4 +1,7 @@
-from sqlalchemy import MetaData
+from datetime import datetime
+from typing import ClassVar
+
+from sqlalchemy import DateTime, MetaData
 from sqlalchemy.orm import DeclarativeBase
 
 NAMING_CONVENTION = {
@@ -12,3 +15,6 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    # Every datetime annotation is an instant in UTC. Keep ORM inference
+    # aligned with the TIMESTAMPTZ columns declared by the migrations.
+    type_annotation_map: ClassVar = {datetime: DateTime(timezone=True)}

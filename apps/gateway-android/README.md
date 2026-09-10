@@ -116,12 +116,24 @@ Se não houver Android SDK neste host, o scaffold continua válido para inspeç�
 
 ### Configuração do servidor
 
-Editar `domain/GatewayConfig.kt` ou `local.properties`:
+O APK recebe a identidade do gateway no momento do build. Nunca coloque o token
+em arquivos versionados. A forma preferida para um release é usar variáveis de
+ambiente locais:
+
+```bat
+set P2A_GATEWAY_BASE_URL=https://ptr.rotadeataque.com.br/api/v1/
+set P2A_GATEWAY_DEVICE_ID=GW-ANDROID-001
+set P2A_GATEWAY_ID=GW-ANDROID-001
+set P2A_GATEWAY_SECRET=...
+```
+
+Como alternativa local, `local.properties` (ignorado pelo Git) aceita:
 
 ```properties
-gateway.baseUrl=https://SEU_VPS/api/v1/
+gateway.baseUrl=https://ptr.rotadeataque.com.br/api/v1/
 gateway.deviceId=GW-ANDROID-001
-gateway.deviceSecret=...
+gateway.gatewayId=GW-ANDROID-001
+gateway.gatewaySecret=...
 ```
 
 `GatewayAuthInterceptor` envia `X-Device-Id`, `Authorization: Bearer <secret>`, `X-Firmware-Version`.
