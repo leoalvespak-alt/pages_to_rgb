@@ -147,9 +147,15 @@ async def worker_health() -> dict[str, Any]:
                 tls=settings.TEMPORAL_TLS,
                 lazy=True,
             )
+            from temporalio.api.taskqueue.v1 import TaskQueue
+            from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
             desc = await client.service_client.workflow_service.describe_task_queue(
-                task_queue=settings.TEMPORAL_TASK_QUEUE,
-                namespace=settings.TEMPORAL_NAMESPACE,
+                DescribeTaskQueueRequest(
+                    namespace=settings.TEMPORAL_NAMESPACE,
+                    task_queue=TaskQueue(name=settings.TEMPORAL_TASK_QUEUE),
+                    report_pollers=True,
+                )
             )
             pollers = len(getattr(desc, "pollers", []) or [])
         return {

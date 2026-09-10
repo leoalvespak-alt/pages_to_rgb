@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy pages-to-rgb isolado — não toca Rota (lockfile/compose/porta diferentes).
-# Uso: ./scripts/deploy-pages-rgb-local.sh <IMAGE_TAG>
+# Production deploy for the isolated pages-to-rgb stack hosted by local WSL2.
+# The Rota stack keeps its own compose project, lock and ports.
 
 LOCKFILE="/tmp/pages-rgb-deploy.lock"
 COMPOSE="infra/docker-compose.pages-rgb.prod.yml"
-CADDYFILE="infra/Caddyfile.pages-rgb"
 ENV_FILE="/srv/pages-to-rgb/config/.env.pages-rgb"
-SRC_ENV=".env.pages-rgb"
+READY_HOST="ptr.rotadeataque.com.br"
+LOCAL_BASE="http://127.0.0.1:8081"
+PROJECT="pages-to-rgb"
+
+IMAGE_TAG="${1:?Usage: $0 sha-<immutable-tag>}"
+if [[ "$IMAGE_TAG" == "latest" ]]; then
+  echo "latest is forbidden for Production deploys" >&2
+  exit 1
+fi
+export IMAGE_TAG
 
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then
@@ -16,45 +24,68 @@ if ! flock -n 9; then
   exit 1
 fi
 
-IMAGE_TAG="${1:-latest}"
-export IMAGE_TAG
-
-if [[ ! -f "$ENV_FILE" && -f "$SRC_ENV" ]]; then
-  echo "WARN: $ENV_FILE not found, using $SRC_ENV — copy to $ENV_FILE for production" >&2
-  ENV_FILE="$SRC_ENV"
-fi
-
 if [[ ! -f "$COMPOSE" ]]; then
   echo "Missing $COMPOSE" >&2
   exit 1
 fi
-
-echo "=== pages-to-rgb deploy TAG=$IMAGE_TAG ==="
-
-# Pull e up
-if command -v docker >/dev/null 2>&1; then
-  docker compose -f "$COMPOSE" pull pages-rgb-app || true
-  docker compose -f "$COMPOSE" up -d
-else
-  echo "docker not found, skipping compose up (CI mode)" >&2
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing operational environment file $ENV_FILE" >&2
+  exit 1
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker not found" >&2
+  exit 1
 fi
 
-# Healthcheck até 90s
-echo "Waiting healthcheck..."
-for i in $(seq 1 18); do
-  if curl -fsS http://127.0.0.1:8080/api/v1/health/live >/dev/null 2>&1 || curl -fsS http://127.0.0.1:8001/api/v1/health/live >/dev/null 2>&1 || curl -fsS http://localhost:8000/api/v1/health/live >/dev/null 2>&1; then
-    echo "health ok after $((i*5))s"
+COMPOSE_ARGS=("-p" "$PROJECT" "-f" "$COMPOSE" "--env-file" "$ENV_FILE")
+
+echo "=== pages-to-rgb WSL2 Production deploy TAG=$IMAGE_TAG ==="
+
+echo "--- recoverable database backup ---"
+./scripts/backup-db.sh
+
+echo "--- compose validation ---"
+docker compose "${COMPOSE_ARGS[@]}" config --quiet
+
+echo "--- pull immutable images ---"
+docker compose "${COMPOSE_ARGS[@]}" pull
+
+echo "--- additive migrations ---"
+docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps pages-rgb-app \
+  python -m alembic upgrade head
+
+echo "--- app, worker, admin and Caddy rollout ---"
+docker compose "${COMPOSE_ARGS[@]}" up -d pages-rgb-app pages-rgb-worker admin pages-rgb-caddy
+
+echo "--- local readiness ---"
+READY_OK=0
+for i in $(seq 1 24); do
+  if curl -fsS -H "Host: $READY_HOST" \
+      "$LOCAL_BASE/api/v1/health/ready" \
+      | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"'; then
+    echo "ready ok after ~$((i * 5))s"
+    READY_OK=1
     break
   fi
-  echo "  attempt $i/18..."
+  echo "  attempt $i/24..."
   sleep 5
-  if [[ $i -eq 18 ]]; then
-    echo "health check failed" >&2
-    docker compose -f "$COMPOSE" ps || true
-    docker compose -f "$COMPOSE" logs --tail=100 || true
-    exit 1
-  fi
 done
+if [[ "$READY_OK" != "1" ]]; then
+  echo "local readiness failed" >&2
+  docker compose "${COMPOSE_ARGS[@]}" ps
+  docker compose "${COMPOSE_ARGS[@]}" logs --tail=150 pages-rgb-app pages-rgb-worker admin pages-rgb-caddy >&2 || true
+  exit 1
+fi
 
-echo "$IMAGE_TAG" > .last-deployed-pages-rgb-tag
-echo "Deploy OK tag=$IMAGE_TAG"
+curl -fsS -H "Host: $READY_HOST" "$LOCAL_BASE/api/v1/health/worker"
+echo
+docker compose "${COMPOSE_ARGS[@]}" ps
+
+echo "--- public tunnel smoke ---"
+curl -fsS "https://$READY_HOST/api/v1/health/ready"
+echo
+curl -fsS "https://$READY_HOST/api/v1/health/worker"
+echo
+
+printf '%s\n' "$IMAGE_TAG" > /srv/pages-to-rgb/.last-deployed-pages-rgb-tag
+echo "Deploy OK tag=$IMAGE_TAG project=$PROJECT host=$READY_HOST"

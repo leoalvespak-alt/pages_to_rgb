@@ -57,6 +57,8 @@ services:
       TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:?TEMPORAL_ADDRESS é obrigatório}
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-pages-to-audio}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-pages-to-audio-main}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - pages_rgb_net
     depends_on:
