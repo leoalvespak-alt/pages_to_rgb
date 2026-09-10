@@ -59,6 +59,12 @@ services:
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-pages-to-audio-main}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - pages_rgb_net
     depends_on:
