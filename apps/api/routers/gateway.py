@@ -12,6 +12,13 @@ from sqlalchemy import select
 from apps.api.dependencies import SettingsDep, UowDep
 from src.pages_to_audio.admin.settings_service import get_effective_admin_settings, rgb_for_answer
 from src.pages_to_audio.auth.gateway import verify_gateway_token
+from src.pages_to_audio.camera_profiles.contract import normalize_camera_mode
+from src.pages_to_audio.camera_profiles.service import (
+    CameraProfileError,
+    ensure_default_profile,
+    profile_payload,
+    require_v2_enabled,
+)
 from src.pages_to_audio.capture.policy import CapturePolicy, build_capture_policy
 from src.pages_to_audio.common.contract_ids import (
     ESP_ID_PATTERN,
@@ -134,6 +141,8 @@ class SessionStartRequest(BaseModel):
     # Tradução contrato §3.7 (local start): resume_hint booleano + last_session_id.
     resume_requested: bool = False
     last_session_id: str | None = Field(default=None, max_length=63, pattern=ESP_ID_PATTERN)
+    camera_mode: str = Field(default="OCR", min_length=1, max_length=16)
+    camera_capabilities_version: str | None = Field(default=None, pattern=r"^v[0-9]+$")
 
 
 class SessionStartResponse(BaseModel):
@@ -144,6 +153,27 @@ class SessionStartResponse(BaseModel):
     minimum_ratio: float
     resumed: bool = False
     cursor: int = Field(default=0, ge=0, le=MAX_EXACT_CURSOR)
+    camera_profile_revision_id: str | None = None
+    camera_profile_snapshot: dict[str, Any] | None = None
+    requested_camera_config: dict[str, Any] | None = None
+    effective_camera_config: dict[str, Any] | None = None
+    firmware_version: str | None = None
+    capabilities_version: str | None = None
+
+
+def _camera_response_fields(session: Session) -> dict[str, Any]:
+    return {
+        "camera_profile_revision_id": (
+            str(session.camera_profile_revision_id)
+            if session.camera_profile_revision_id is not None
+            else None
+        ),
+        "camera_profile_snapshot": session.camera_profile_snapshot_json,
+        "requested_camera_config": session.requested_camera_config_json,
+        "effective_camera_config": session.effective_camera_config_json,
+        "firmware_version": session.firmware_version,
+        "capabilities_version": session.capabilities_version,
+    }
 
 
 @router.post("/session/start", response_model=SessionStartResponse)
@@ -154,6 +184,10 @@ async def session_start(
     uow: UowDep,
 ) -> SessionStartResponse:
     """Create or resume a capture session (idempotent)."""
+    try:
+        camera_mode = normalize_camera_mode(body.camera_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     gateway = await uow.session.scalar(
         select(AndroidGateway).where(AndroidGateway.gateway_code == gateway_id).with_for_update()
     )
@@ -234,6 +268,7 @@ async def session_start(
                 minimum_ratio=float(resume_session.minimum_ratio),
                 resumed=True,
                 cursor=await _result_cursor_for(uow, resume_session),
+                **_camera_response_fields(resume_session),
             )
         # Sem hint: retoma a CAPTURING mais recente do mesmo vínculo (autoritativo).
         resume_session = await uow.session.scalar(
@@ -256,6 +291,7 @@ async def session_start(
                 minimum_ratio=float(resume_session.minimum_ratio),
                 resumed=True,
                 cursor=await _result_cursor_for(uow, resume_session),
+                **_camera_response_fields(resume_session),
             )
         raise HTTPException(
             status_code=409,
@@ -287,16 +323,38 @@ async def session_start(
                     minimum_ratio=float(hinted.minimum_ratio),
                     resumed=True,
                     cursor=await _result_cursor_for(uow, hinted),
+                    **_camera_response_fields(hinted),
                 )
             raise HTTPException(
                 status_code=409,
                 detail=f"Hinted session is {hinted.status}; not resumable",
             )
 
+    camera_profile = None
+    if settings.CAMERA_CONTRACT_V2_ENABLED:
+        try:
+            require_v2_enabled(
+                settings,
+                device,
+                advertised_version=body.camera_capabilities_version,
+            )
+            camera_profile = await ensure_default_profile(
+                uow.session,
+                mode=camera_mode,
+                actor=gateway_id,
+                settings=settings,
+            )
+        except CameraProfileError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"reason_code": exc.reason_code, "message": str(exc)},
+            ) from exc
+
     session_id = new_public_id()
     now = datetime.now(UTC)
     # S07/contrato §2: novas sessões recebem explicitamente o perfil low-power
     # (12%/150ms/2850ms). Revisões antigas e seus hashes permanecem imutáveis.
+    camera_values = profile_payload(camera_profile) if camera_profile is not None else None
     session = Session(
         public_id=session_id,
         device_id=device.id,
@@ -325,9 +383,47 @@ async def session_start(
             "verify_model": admin_settings.verify_model,
             "arbiter_model": admin_settings.arbiter_model,
         },
+        camera_profile_revision_id=camera_profile.id if camera_profile is not None else None,
+        camera_profile_snapshot_json=(
+            {
+                "mode": camera_profile.mode,
+                "revision": camera_profile.revision,
+                "public_id": str(camera_profile.public_id),
+                "capabilities_version": camera_profile.capabilities_version,
+                "config": camera_values,
+            }
+            if camera_profile is not None
+            else None
+        ),
+        requested_camera_config_json=camera_values,
+        effective_camera_config_json=camera_values,
+        firmware_version=device.firmware_version if camera_profile is not None else None,
+        capabilities_version=(
+            camera_profile.capabilities_version if camera_profile is not None else None
+        ),
     )
     uow.session.add(session)
     await uow.session.flush()
+    if camera_profile is not None:
+        from src.pages_to_audio.db.models.audit_event import AuditEvent
+
+        uow.session.add(
+            AuditEvent(
+                session_id=session.id,
+                event_type="CAMERA_PROFILE_SNAPSHOT_CREATED",
+                stage="CAPTURE",
+                severity="INFO",
+                reason_code=None,
+                actor_type="gateway",
+                payload={
+                    "mode": camera_profile.mode,
+                    "revision": camera_profile.revision,
+                    "profile_public_id": str(camera_profile.public_id),
+                    "requested": camera_values,
+                    "effective": camera_values,
+                },
+            )
+        )
     logger.info(
         "session_start",
         session_id=session_id,
@@ -343,6 +439,7 @@ async def session_start(
         minimum_ratio=mr,
         resumed=False,
         cursor=0,
+        **_camera_response_fields(session),
     )
 
 
@@ -371,6 +468,15 @@ async def heartbeat(
     device = await uow.session.get(Device, session.device_id)
     if device is not None:
         device.last_seen_at = datetime.now(UTC)
+        telemetry = {
+            key: payload[key]
+            for key in ("state", "rssi", "firmware", "camera_profile")
+            if isinstance(payload, dict) and key in payload
+        }
+        if telemetry:
+            metadata = dict(device.metadata_ or {})
+            metadata["telemetry"] = telemetry
+            device.metadata_ = metadata
     await uow.session.flush()
     return {"session_id": session_id, "status": session.status, "policy_valid": True}
 
@@ -504,7 +610,6 @@ async def end_signal(
     session_id: str,
     gateway_id: GatewayIdDep,
     uow: UowDep,
-    settings: SettingsDep,
 ) -> dict[str, Any]:
     session = await uow.session.scalar(
         select(Session)
@@ -616,14 +721,9 @@ async def end_signal(
 
     # Tentativa best-effort de despacho imediato (após intent durável).
     try:
-        temporal_addr = getattr(settings, "TEMPORAL_ADDRESS", "")
-        if temporal_addr:
-            from src.pages_to_audio.capture.dispatcher import dispatch_pending
-
-            await dispatch_pending(uow.session)
-            await uow.session.flush()
-        else:
-            logger.info("workflow_dispatch_skipped_no_temporal", session_id=session_id)
+        # The post-commit worker owns dispatch; this request never dispatches
+        # against its still-open transaction.
+        pass
     except Exception as exc:
         # Intent permanece PENDING para retry observável pelo dispatcher.
         logger.warning("workflow_dispatch_failed_pending", error=str(exc), session_id=session_id)
@@ -959,6 +1059,8 @@ async def upload_frame_gateway(
     x_received_at: str | None = Header(None, alias="X-Received-Android-At"),
     x_resolution: str | None = Header(None, alias="X-Resolution"),
     x_orientation: int | None = Header(None, alias="X-Orientation"),
+    x_page_number: int | None = Header(None, alias="X-Page-Number", ge=0),
+    x_frame_number: int | None = Header(None, alias="X-Frame-Number", ge=0),
 ) -> dict[str, Any]:
     """Receive a JPEG frame from the Android gateway."""
     # Limite de corpo aplicado antes de carregar integralmente (S01.5): FastAPI já
@@ -1002,6 +1104,8 @@ async def upload_frame_gateway(
         source_resolution=x_resolution,
         width=width,
         height=height,
+        page_number=x_page_number,
+        frame_number=x_frame_number,
     )
 
     try:
@@ -1016,6 +1120,7 @@ async def upload_frame_gateway(
         "sha256": result.sha256,
         "storage_key": result.storage_key,
         "frame_db_id": result.frame_db_id,
+        "derived_storage_key": result.derived_storage_key,
         "duplicate": result.duplicate,
     }
 

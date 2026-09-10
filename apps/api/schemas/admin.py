@@ -189,12 +189,157 @@ class RgbTestRequest(BaseModel):
 
 
 class RgbTestResponse(BaseModel):
-    command_id: int
+    command_id: str
     session_id: str
     rgb: tuple[int, int, int]
     brightness_percent: int
     on_ms: int
     off_ms: int
+
+
+class CameraCapabilitiesV1(BaseModel):
+    """Read-only capability report for the camera contract v2."""
+
+    version: Literal["v1"] = "v1"
+    contract_version: Literal["v2"] = "v2"
+    firmware_version: str = "unknown"
+    driver_version: str = "esp32-camera 2.1.7"
+    available: dict[str, Any]
+    protected: dict[str, Any]
+    unavailable: dict[str, str]
+    feature_enabled: bool = False
+    compatible: bool = False
+    reason_code: str | None = None
+    message: str
+
+
+class CameraProfileCreate(BaseModel):
+    """Requested values for a new immutable OCR/PHOTO revision."""
+
+    device_code: str | None = Field(default=None, max_length=63, pattern=r"^[A-Za-z0-9._:-]+$")
+    mode: str = Field(default="OCR", min_length=1, max_length=16)
+    frame_size: Literal["UXGA"] = "UXGA"
+    esp_jpeg_quality: int = Field(default=10, ge=8, le=12)
+    frame_count: int | None = Field(default=None, ge=1, le=3)
+    intra_frame_gap_ms: int = Field(default=220, ge=180, le=300)
+    page_interval_ms: int = Field(default=5000, ge=5000, le=86_400_000)
+    brightness: int = Field(default=0, ge=-2, le=2)
+    contrast: int = Field(default=1, ge=-2, le=2)
+    saturation: int = Field(default=0, ge=-2, le=2)
+    awb: bool = True
+    awb_gain: bool = True
+    wb_mode: Literal["AUTO", "SUNNY", "CLOUDY", "OFFICE", "HOME"] = "AUTO"
+    aec: bool = True
+    aec2: bool = True
+    agc: bool = True
+    bpc: bool = True
+    wpc: bool = True
+    raw_gamma: bool = True
+    lens_correction: bool = True
+    dcw: bool = True
+    hmirror: bool = False
+    vflip: bool = False
+    special_effect: Literal["NORMAL", "NEGATIVE", "GRAYSCALE", "RED", "GREEN", "BLUE", "SEPIA"] = (
+        "NORMAL"
+    )
+    colorbar: bool = False
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> CameraProfileCreate:
+        from src.pages_to_audio.camera_profiles.contract import normalize_camera_mode
+
+        normalize_camera_mode(self.mode)
+        return self
+
+
+class CameraProfileRevisionRead(BaseModel):
+    public_id: str
+    device_code: str | None
+    mode: Literal["OCR", "PHOTO"]
+    revision: int
+    capabilities_version: str
+    requested: dict[str, Any]
+    effective: dict[str, Any]
+    created_by: str | None
+    created_at: datetime
+    active: bool
+
+
+class CameraProfileListResponse(BaseModel):
+    items: list[CameraProfileRevisionRead]
+    feature_enabled: bool
+
+
+class AdminDeviceRead(BaseModel):
+    device_code: str
+    display_name: str
+    enabled: bool
+    firmware_version: str | None
+    camera_capabilities_version: str | None = None
+    capture_source: str
+    last_seen_at: datetime | None = None
+    telemetry: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminDeviceListResponse(BaseModel):
+    items: list[AdminDeviceRead]
+
+
+class RgbDeviceTestRequest(BaseModel):
+    """Manual physical RGB request; the device is addressed by the URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str | None = Field(default=None, max_length=64)
+    rgb: tuple[int, int, int] | None = None
+    hex_color: str | None = Field(default=None, pattern=r"^#?[0-9A-Fa-f]{6}$")
+    brightness_percent: int = Field(default=12, ge=0, le=100)
+    on_ms: int = Field(default=3000, ge=100, le=60000)
+    off_ms: int = Field(default=5000, ge=0, le=60000)
+    repeat_count: int = Field(default=1, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def normalize_color(self) -> RgbDeviceTestRequest:
+        if self.rgb is None and self.hex_color is None:
+            raise ValueError("Provide rgb or hex_color")
+        if self.rgb is not None and self.hex_color is not None:
+            raise ValueError("Provide only one of rgb or hex_color")
+        if self.rgb is not None and any(channel < 0 or channel > 255 for channel in self.rgb):
+            raise ValueError("RGB channels must be in [0, 255]")
+        if self.hex_color is not None:
+            value = self.hex_color.removeprefix("#")
+            self.rgb = tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))  # type: ignore[assignment]
+        if (self.on_ms + self.off_ms) * self.repeat_count > 120000:
+            raise ValueError("RGB test duration must be at most 120 seconds")
+        return self
+
+
+class RgbDeviceCommandRead(BaseModel):
+    command_id: str
+    device_code: str
+    session_id: str | None
+    kind: Literal["TEST", "STOP"]
+    status: str
+    requested: dict[str, Any]
+    effective: dict[str, Any]
+    expires_at: datetime
+    failure_reason: str | None = None
+    idempotent: bool = False
+
+
+class RgbDeviceCommandListResponse(BaseModel):
+    items: list[RgbDeviceCommandRead]
+    cursor: int
+
+
+class RgbDeviceEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["FORWARDED", "RECEIVED", "APPLIED", "OFF", "FAILED", "EXPIRED", "CANCELLED"]
+    effective_payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    firmware_version: str | None = Field(default=None, max_length=128)
+    device_timestamp: datetime | None = None
 
 
 class AdminSessionListItem(BaseModel):

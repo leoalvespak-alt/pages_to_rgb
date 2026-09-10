@@ -5,6 +5,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.parcelize")
 }
 
+val releaseKeystorePath = System.getenv("P2A_RELEASE_KEYSTORE")
+val releaseStorePassword = System.getenv("P2A_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("P2A_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("P2A_RELEASE_KEY_PASSWORD")
+val releaseSigningConfigured = listOf(
+    releaseKeystorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.pagestoaudio.gateway"
     compileSdk = 34
@@ -22,8 +33,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -67,6 +92,25 @@ android {
             arg("room.schemaLocation", "$projectDir/schemas")
         }
     }
+}
+
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    doLast {
+        check(releaseSigningConfigured) {
+            "Release signing requires P2A_RELEASE_KEYSTORE, " +
+                "P2A_RELEASE_STORE_PASSWORD, P2A_RELEASE_KEY_ALIAS, and " +
+                "P2A_RELEASE_KEY_PASSWORD"
+        }
+        check(file(requireNotNull(releaseKeystorePath)).isFile) {
+            "Release keystore does not exist: $releaseKeystorePath"
+        }
+    }
+}
+
+tasks.matching {
+    it.name == "assembleRelease" || it.name == "bundleRelease" || it.name == "packageRelease"
+}.configureEach {
+    dependsOn(validateReleaseSigning)
 }
 
 dependencies {

@@ -25,3 +25,20 @@ def audio_status_key(session_id: str, artifact_id: str) -> str:
 
 def audio_final_key(session_id: str, artifact_id: str) -> str:
     return f"sessions/{session_id}/audio/final/{artifact_id}.mp3"
+
+
+# D01/D04/D05 — namespace próprio de diagnóstico (nunca mistura com missão).
+def diag_photo_key(device_code: str, diagnostic_id: str, frame_index: int) -> str:
+    return f"diagnostics/{device_code}/{diagnostic_id}/photo_{frame_index:04d}.jpg"
+
+
+def diag_clip_frame_key(device_code: str, diagnostic_id: str, frame_index: int) -> str:
+    return f"diagnostics/{device_code}/{diagnostic_id}/clip_{frame_index:04d}.jpg"
+
+
+def diag_preview_key(device_code: str, diagnostic_id: str) -> str:
+    return f"diagnostics/{device_code}/{diagnostic_id}/preview_latest.jpg"
+
+
+def diag_clip_key(device_code: str, diagnostic_id: str) -> str:
+    return f"diagnostics/{device_code}/{diagnostic_id}/clip.mp4"

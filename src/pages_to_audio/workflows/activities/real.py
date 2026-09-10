@@ -23,15 +23,50 @@ from src.pages_to_audio.db.models.frame import Frame
 from src.pages_to_audio.db.models.question import Question
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.db.uow import UnitOfWork
+from src.pages_to_audio.domain.enums.roles import ActorType
 from src.pages_to_audio.domain.enums.session_state import SessionState
 from src.pages_to_audio.domain.gates import evaluate_gate_1, evaluate_gate_2
+from src.pages_to_audio.domain.state_machine import transition_session
 from src.pages_to_audio.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+@activity.defn(name="advance_session_state")
+async def advance_session_state(session_public_id: str, target_state: str) -> dict[str, Any]:
+    """Advance the persisted workflow state exactly once, under row lock.
+
+    Temporal retries may replay this activity.  Treat an already-reached target
+    as success, while every actual mutation goes through the state machine and
+    is committed in its own transaction.
+    """
+
+    target = SessionState(target_state)
+    async with UnitOfWork() as uow:
+        session = await _load_session(uow, session_public_id)
+        current = SessionState(session.status)
+        if current != target:
+            session = await transition_session(
+                uow,
+                session,
+                target,
+                reason=None,
+                actor=ActorType.SYSTEM,
+                payload={"workflow_activity": "advance_session_state"},
+            )
+            await uow.commit()
+        return {
+            "session_id": session_public_id,
+            "from_state": current.value,
+            "status": SessionState(session.status).value,
+        }
+
+
 def _step_log(step: str, session_id: str, started: float, **extra: Any) -> None:
     duration_ms = int((time.monotonic() - started) * 1000)
+    # Activity result dictionaries intentionally carry session_id; remove the
+    # duplicate before passing structured fields to the logger.
+    extra.pop("session_id", None)
     try:
         attempt = activity.info().attempt
     except Exception:
@@ -361,7 +396,9 @@ async def evaluate_gate2(session_public_id: str) -> dict[str, Any]:
             await uow.session.scalar(
                 select(func.count())
                 .select_from(FinalAnswer)
+                .join(Question, FinalAnswer.question_id == Question.id)
                 .where(
+                    Question.session_id == session.id,
                     FinalAnswer.validated.is_(True),
                 )
             )
@@ -483,6 +520,7 @@ async def complete_session(session_public_id: str) -> dict[str, Any]:
 
 
 REAL_ACTIVITIES = [
+    advance_session_state,
     validate_locked_session,
     materialize_logical_pages,
     preprocess_pages,

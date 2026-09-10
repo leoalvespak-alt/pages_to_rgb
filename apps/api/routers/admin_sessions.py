@@ -176,7 +176,11 @@ async def session_detail(
         await uow.session.scalars(
             select(Frame)
             .where(Frame.session_id == session.id)
-            .order_by(Frame.created_at)
+            .order_by(
+                Frame.page_number.nulls_last(),
+                Frame.frame_number.nulls_last(),
+                Frame.created_at,
+            )
             .offset((frames_page - 1) * frames_limit)
             .limit(frames_limit)
         )

@@ -128,7 +128,10 @@ class R2StorageAdapter:
         def _put() -> None:
             assert self._client is not None
             self._client.put_object(
-                Bucket=bucket,
+                # Reads and existence checks use the resolved physical bucket;
+                # using the logical alias here silently writes to the wrong R2
+                # bucket whenever aliases are configured.
+                Bucket=resolved,
                 Key=key,
                 Body=data,
                 ContentType=content_type,

@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
+
 from src.pages_to_audio.common.errors import InvalidStateTransition, ReasonCode
 from src.pages_to_audio.domain.enums.audit import AuditEventType, AuditSeverity, AuditStage
 from src.pages_to_audio.domain.enums.roles import ActorType
@@ -198,13 +200,24 @@ async def transition_session(
     """
     from src.pages_to_audio.db.models.audit_event import AuditEvent
 
-    current = SessionState(session.status)
+    # Acquire the row lock before reading/validating the state.  SQLAlchemy's
+    # ``with_for_update`` is a Select method (there is no ORM helper to import),
+    # and locking after validation leaves a race where two workers can both
+    # validate the same state and emit conflicting transitions.
+    locked_session = await uow.session.scalar(
+        select(type(session)).where(type(session).id == session.id).with_for_update()
+    )
+    if locked_session is None:
+        raise ValueError(f"Session {session.id} not found for locking")
+
+    current = SessionState(locked_session.status)
     allowed = ALLOWED_TRANSITIONS.get(current, frozenset())
 
     if target_state not in allowed:
-        # Record invalid-transition audit event before raising
+        # Record invalid-transition audit event before raising, in the same
+        # transaction as the locked read so the audit reflects the real state.
         invalid_event = AuditEvent(
-            session_id=session.id,
+            session_id=locked_session.id,
             event_type=AuditEventType.INVALID_TRANSITION,
             stage=AuditStage.SYSTEM,
             severity=AuditSeverity.ERROR,
@@ -219,13 +232,6 @@ async def transition_session(
         uow.session.add(invalid_event)
         await uow.session.flush()
         raise InvalidStateTransition(current, target_state)
-
-    # Acquire pessimistic lock on the session row
-    from sqlalchemy.orm import with_for_update as _wfu
-
-    locked_session = await uow.session.get(type(session), session.id, options=[_wfu()])
-    if locked_session is None:
-        raise ValueError(f"Session {session.id} not found for locking")
 
     # Apply state change
     locked_session.status = target_state  # ONLY this function writes status

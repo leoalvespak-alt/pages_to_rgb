@@ -8,6 +8,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from src.pages_to_audio.workflows.activities.real import (
+        advance_session_state,
         arbitrate_disagreements,
         assemble_final_audio,
         complete_session,
@@ -72,6 +73,13 @@ class ProcessExamWorkflow:
     async def run(self, session_public_id: str) -> dict[str, Any]:
         sid = session_public_id
 
+        async def advance(target: str) -> None:
+            await workflow.execute_activity(
+                advance_session_state,
+                args=[sid, target],
+                **QUICK_ACTIVITY_OPTS,
+            )
+
         # The RGB result channel has its own delivery state; it does not alter
         # the existing SessionState machine or wait for a device ACK.
         await workflow.execute_activity(
@@ -82,15 +90,18 @@ class ProcessExamWorkflow:
 
         # Step 1 — ValidateLockedSession
         await workflow.execute_activity(validate_locked_session, sid, **QUICK_ACTIVITY_OPTS)
+        await advance("IMAGE_PROCESSING")
 
         # Step 2 — MaterializeLogicalPages
         await workflow.execute_activity(materialize_logical_pages, sid, **IMAGE_ACTIVITY_OPTS)
 
         # Step 3 — PreprocessPages
         await workflow.execute_activity(preprocess_pages, sid, **IMAGE_ACTIVITY_OPTS)
+        await advance("OCR_PROCESSING")
 
         # Step 4 — RunOCR
         await workflow.execute_activity(run_ocr, sid, **OCR_ACTIVITY_OPTS)
+        await advance("RECONSTRUCTING")
 
         # Step 5 — ReconstructExam
         await workflow.execute_activity(reconstruct_exam, sid, **LLM_SOLVER_ACTIVITY_OPTS)
@@ -99,12 +110,15 @@ class ProcessExamWorkflow:
         await workflow.execute_activity(
             rescue_incomplete_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS
         )
+        await advance("GATE_1")
 
         # Step 7 — EvaluateGate1
         gate1_result: dict[str, Any] = await workflow.execute_activity(
             evaluate_gate1, sid, **QUICK_ACTIVITY_OPTS
         )
         gate1_passed: bool = gate1_result.get("passed", False)
+
+        await advance("RAG_RETRIEVING" if gate1_passed else "BLOCKED_GATE_1")
 
         # Step 8 — EmitPreCorrectionStatus
         await workflow.execute_activity(
@@ -119,17 +133,21 @@ class ProcessExamWorkflow:
         if gate1_passed:
             # Step 9 — RetrieveKnowledge (§9, Gate 1 guard — Invariant 5)
             await workflow.execute_activity(retrieve_knowledge, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await advance("SOLVING")
 
             # Step 10 — SolveQuestions (Invariant 5: unreachable without Gate 1)
             await workflow.execute_activity(solve_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await advance("VERIFYING")
 
             # Step 11 — VerifyQuestions
             await workflow.execute_activity(verify_questions, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await advance("ARBITRATING")
 
             # Step 12 — ArbitrateDisagreements
             await workflow.execute_activity(
                 arbitrate_disagreements, sid, **LLM_ARBITER_ACTIVITY_OPTS
             )
+            await advance("GATE_2")
 
             # Step 13 — RescueFailedAnswers
             await workflow.execute_activity(rescue_failed_answers, sid, **LLM_SOLVER_ACTIVITY_OPTS)
@@ -139,6 +157,7 @@ class ProcessExamWorkflow:
                 evaluate_gate2, sid, **QUICK_ACTIVITY_OPTS
             )
             gate2_passed = gate2_result.get("passed", False)
+            await advance("STATUS_AUDIO" if gate2_passed else "BLOCKED_GATE_2")
 
         # Step 15 — EmitPostCorrectionStatus (always — includes failure status)
         await workflow.execute_activity(
@@ -146,6 +165,16 @@ class ProcessExamWorkflow:
             args=[sid, gate2_result],
             **QUICK_ACTIVITY_OPTS,
         )
+
+        # A failed gate still emits a terminal status, but no audio work is
+        # allowed.  A passed Gate 2 enters the TTS state before the first audio
+        # activity, preserving the invariant in the state machine.
+        if not gate1_passed:
+            await advance("STATUS_AUDIO")
+        elif not gate2_passed:
+            await advance("STATUS_AUDIO")
+        else:
+            await advance("TTS_GENERATING")
 
         # Publish after Gate 2 is definitive. The activity explicitly emits
         # RESULT_CANCELLED when the validated answer set cannot be represented
@@ -159,9 +188,33 @@ class ProcessExamWorkflow:
         if gate2_passed:
             # Steps 16-19 -- TTS pipeline (Invariant 6: unreachable without Gate 2)
             await workflow.execute_activity(generate_answer_audio, sid, **LLM_SOLVER_ACTIVITY_OPTS)
+            await advance("AUDIO_ASSEMBLING")
             await workflow.execute_activity(assemble_final_audio, sid, **FFMPEG_ACTIVITY_OPTS)
-            await workflow.execute_activity(validate_final_audio, sid, **QUICK_ACTIVITY_OPTS)
-            await workflow.execute_activity(publish_final_audio, sid, **STORAGE_ACTIVITY_OPTS)
+            await advance("AUDIO_VALIDATING")
+            validation = await workflow.execute_activity(
+                validate_final_audio, sid, **QUICK_ACTIVITY_OPTS
+            )
+            if not validation.get("valid", False):
+                await advance("FAILED_RECOVERABLE")
+                return {
+                    "session_id": sid,
+                    "gate1_passed": gate1_passed,
+                    "gate2_passed": gate2_passed,
+                    "completed": False,
+                    "status": "AUDIO_VALIDATION_FAILED",
+                }
+            await advance("READY")
+            publication = await workflow.execute_activity(
+                publish_final_audio, sid, **STORAGE_ACTIVITY_OPTS
+            )
+            if not publication.get("published", False):
+                return {
+                    "session_id": sid,
+                    "gate1_passed": gate1_passed,
+                    "gate2_passed": gate2_passed,
+                    "completed": False,
+                    "status": "AUDIO_PUBLICATION_FAILED",
+                }
 
         # Step 20 — CompleteSession
         final = await workflow.execute_activity(complete_session, sid, **QUICK_ACTIVITY_OPTS)

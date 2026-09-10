@@ -14,6 +14,7 @@ from apps.api.schemas.admin import (
     ProviderCatalogResponse,
     ProviderTestRequest,
     ProviderTestResponse,
+    RgbDeviceTestRequest,
     RgbTestRequest,
     RgbTestResponse,
 )
@@ -26,12 +27,13 @@ from src.pages_to_audio.admin.settings_service import (
 )
 from src.pages_to_audio.auth.admin import AdminClaimsDep, AdminCsrfDep
 from src.pages_to_audio.db.models.audit_event import AuditEvent
-from src.pages_to_audio.db.models.rgb_test_command import RgbTestCommand
+from src.pages_to_audio.db.models.device import Device
 from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.llm.providers.catalog import (
     catalog_payload,
     is_supported_model,
 )
+from src.pages_to_audio.rgb.device_commands import RgbCommandError, create_manual_command
 
 router = APIRouter(prefix="/admin/settings", tags=["admin-settings"])
 
@@ -225,33 +227,30 @@ async def send_rgb_test(
         raise HTTPException(status_code=404, detail="Session not found")
     if session.status not in {"CREATED", "CAPTURING"}:
         raise HTTPException(status_code=409, detail="Session is not active")
-    command = RgbTestCommand(
-        session_id=session.id,
-        rgb=list(body.rgb),
-        brightness_percent=body.brightness_percent,
-        on_ms=body.on_ms,
-        off_ms=body.off_ms,
-    )
-    uow.session.add(command)
-    await uow.session.flush()
-    uow.session.add(
-        AuditEvent(
-            session_id=session.id,
-            event_type="ADMIN_RGB_TEST_SENT",
-            stage="DELIVER",
-            severity="INFO",
-            actor_type="admin",
-            payload={
-                "command_id": command.id,
-                "rgb": list(body.rgb),
-                "brightness_percent": body.brightness_percent,
-                "on_ms": body.on_ms,
-                "off_ms": body.off_ms,
-            },
+    device = await uow.session.scalar(select(Device).where(Device.id == session.device_id))
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    try:
+        command = await create_manual_command(
+            uow.session,
+            device_code=device.device_code,
+            body=RgbDeviceTestRequest(
+                session_id=body.session_id,
+                rgb=body.rgb,
+                brightness_percent=body.brightness_percent,
+                on_ms=body.on_ms,
+                off_ms=body.off_ms,
+                repeat_count=1,
+            ),
+            actor=str(_claims.get("sub") or "admin"),
         )
-    )
+    except RgbCommandError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"reason_code": exc.reason_code, "message": str(exc)},
+        ) from exc
     return RgbTestResponse(
-        command_id=command.id,
+        command_id=str(command.command_id),
         session_id=str(session.public_id),
         rgb=body.rgb,
         brightness_percent=body.brightness_percent,

@@ -4,8 +4,13 @@ import android.app.Application
 import android.util.Log
 import com.pagestoaudio.gateway.BuildConfig
 import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pagestoaudio.gateway.domain.GatewayConfig
+import com.pagestoaudio.gateway.domain.RgbCommandRepository
 import com.pagestoaudio.gateway.domain.SessionRepository
 import com.pagestoaudio.gateway.network.ApiService
 import com.pagestoaudio.gateway.network.FallbackDns
@@ -44,6 +49,9 @@ class GatewayApplication : Application(), Configuration.Provider {
     lateinit var sessionRepository: SessionRepository
         private set
 
+    lateinit var rgbCommandRepository: RgbCommandRepository
+        private set
+
     lateinit var okHttpClient: OkHttpClient
         private set
 
@@ -61,10 +69,38 @@ class GatewayApplication : Application(), Configuration.Provider {
             .build()
 
         apiService = retrofit.create(ApiService::class.java)
+        rgbCommandRepository = RgbCommandRepository(apiService, database)
         sessionRepository = SessionRepository(apiService, config.deviceId, config.deviceSecret, database.sessionHistoryDao())
         spoolRepository = SpoolRepository(this, database.spoolDao(), WorkManager.getInstance(this))
 
         Log.i(TAG, "GatewayApplication initialized baseUrl=${config.baseUrl} deviceId=${config.deviceId}")
+    }
+
+    /** Reconciles cloud commands without requiring an Activity or open screen. */
+    fun enqueueRgbCommandSync(deviceCode: String) {
+        if (!config.isProvisioned || deviceCode.isBlank()) return
+        val request = OneTimeWorkRequestBuilder<com.pagestoaudio.gateway.sync.RgbCommandSyncWorker>()
+            .setInputData(
+                androidx.work.Data.Builder()
+                    .putString(com.pagestoaudio.gateway.sync.RgbCommandSyncWorker.KEY_DEVICE_ID, deviceCode)
+                    .build()
+            )
+            .setConstraints(
+                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+            )
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                5,
+                java.util.concurrent.TimeUnit.SECONDS,
+            )
+            .addTag("rgb-command-sync")
+            .addTag("device:$deviceCode")
+            .build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            "rgb-command-sync-$deviceCode",
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
     }
 
     private fun buildOkHttpClient(): OkHttpClient {
@@ -129,6 +165,8 @@ class GatewayWorkerFactory(
             UploadWorker::class.java.name -> UploadWorker(appContext, workerParameters, apiService, database)
             com.pagestoaudio.gateway.sync.CommandPollWorker::class.java.name ->
                 com.pagestoaudio.gateway.sync.CommandPollWorker(appContext, workerParameters, apiService, null, null, null)
+            com.pagestoaudio.gateway.sync.RgbCommandSyncWorker::class.java.name ->
+                com.pagestoaudio.gateway.sync.RgbCommandSyncWorker(appContext, workerParameters)
             else -> null // fallback para default factory
         }
     }

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.pages_to_audio.capture.derivatives import persist_ocr_derivative
 from src.pages_to_audio.common.errors import (
     FrameConflictError,
     NonRetryableError,
@@ -21,7 +23,7 @@ from src.pages_to_audio.db.models.session import Session
 from src.pages_to_audio.domain.enums.session_state import SessionState
 from src.pages_to_audio.domain.ports.storage import StoragePort
 from src.pages_to_audio.observability.logging import get_logger
-from src.pages_to_audio.storage.keys import frame_key
+from src.pages_to_audio.storage.keys import derived_key, frame_key
 
 logger = get_logger(__name__)
 
@@ -64,6 +66,8 @@ class FrameUploadRequest:
     source_resolution: str | None = None
     width: int | None = None
     height: int | None = None
+    page_number: int | None = None
+    frame_number: int | None = None
 
 
 @dataclass
@@ -73,6 +77,7 @@ class FrameUploadResult:
     sha256: str
     size_bytes: int
     duplicate: bool = False
+    derived_storage_key: str | None = None
 
 
 def _validate_mime(data: bytes, mime_type: str) -> None:
@@ -151,9 +156,23 @@ async def upload_frame(
     """Execute mandatory §12.3 flow: validate, SHA-256, guard, capture, idempotency, storage, DB."""
 
     # S01.5: indice nao-negativo (defesa em profundidade além do Header ge=0).
+    started_at = time.perf_counter()
     if request.frame_index < 0:
         raise NonRetryableError(
             f"Invalid frame_index: {request.frame_index}",
+            reason_code=ReasonCode.FRAME_INVALID_MAGIC_BYTES,
+            http_status=422,
+        )
+
+    if request.page_number is not None and request.page_number < 0:
+        raise NonRetryableError(
+            f"Invalid page_number: {request.page_number}",
+            reason_code=ReasonCode.FRAME_INVALID_MAGIC_BYTES,
+            http_status=422,
+        )
+    if request.frame_number is not None and request.frame_number < 0:
+        raise NonRetryableError(
+            f"Invalid frame_number: {request.frame_number}",
             reason_code=ReasonCode.FRAME_INVALID_MAGIC_BYTES,
             http_status=422,
         )
@@ -194,6 +213,20 @@ async def upload_frame(
     capture_source = request.capture_source
     if capture_source not in ("ANDROID_CAMERA", "ESP32_CAMERA"):
         capture_source = "ANDROID_CAMERA"
+    requested_config = getattr(session_obj, "requested_camera_config_json", None) or {}
+    effective_config = getattr(session_obj, "effective_camera_config_json", None) or {}
+    technical_config = (
+        effective_config.get("technical_config")
+        or requested_config.get("technical_config")
+        or {}
+    )
+    requested_resolution = requested_config.get("frame_size") or request.source_resolution
+    effective_resolution = effective_config.get("frame_size") or requested_resolution
+    requested_quality = requested_config.get("esp_jpeg_quality")
+    effective_quality = effective_config.get("esp_jpeg_quality")
+    expected_frames = requested_config.get("frame_count")
+    configured_buffer = technical_config.get("buffer_bytes")
+    dma_enabled = technical_config.get("dma_enabled")
     cap_result = await db_session.execute(
         select(Capture)
         .where(Capture.session_id == session_obj.id, Capture.capture_id == request.capture_id)
@@ -218,6 +251,22 @@ async def upload_frame(
             status="open",
             capture_source=capture_source,
             session_type=getattr(session_obj, "session_type", "EXAM") or "EXAM",
+            camera_profile_revision_id=getattr(session_obj, "camera_profile_revision_id", None),
+            camera_profile_snapshot_json=getattr(
+                session_obj, "camera_profile_snapshot_json", None
+            ),
+            requested_camera_config_json=requested_config or None,
+            effective_camera_config_json=effective_config or None,
+            firmware_version=getattr(session_obj, "firmware_version", None),
+            capabilities_version=getattr(session_obj, "capabilities_version", None),
+            page_number=request.page_number,
+            requested_resolution=requested_resolution,
+            effective_resolution=effective_resolution,
+            requested_esp_jpeg_quality=requested_quality,
+            effective_esp_jpeg_quality=effective_quality,
+            configured_buffer_bytes=configured_buffer,
+            dma_enabled=dma_enabled,
+            expected_frames=expected_frames,
         )
         db_session.add(capture_obj)
         await db_session.flush()
@@ -246,6 +295,9 @@ async def upload_frame(
                 sha256=actual_sha256,
                 size_bytes=len(request.data),
                 duplicate=True,
+                derived_storage_key=derived_key(
+                    request.session_id, "ocr", f"{request.capture_id}-{request.frame_index}"
+                ),
             )
         raise FrameConflictError(
             reason_code=ReasonCode.FRAME_DUPLICATE_CONFLICT,
@@ -277,6 +329,9 @@ async def upload_frame(
             sha256=actual_sha256,
             size_bytes=len(request.data),
             duplicate=True,
+            derived_storage_key=derived_key(
+                request.session_id, "ocr", f"{request.capture_id}-{request.frame_index}"
+            ),
         )
 
     # Upload to storage (overwrite=False — never overwrite originals).
@@ -331,13 +386,29 @@ async def upload_frame(
         sha256=actual_sha256,
         content_length=len(request.data),
         mime_type=request.mime_type,
-        width=request.width if request.width is not None else decoded_w,
-        height=request.height if request.height is not None else decoded_h,
+        width=decoded_w,
+        height=decoded_h,
         storage_key=storage_key,
         received_android_at=received_at,
         capture_source=capture_source,
         android_orientation=request.android_orientation,
         source_resolution=request.source_resolution,
+        page_number=request.page_number,
+        frame_number=(
+            request.frame_number if request.frame_number is not None else request.frame_index
+        ),
+        requested_resolution=requested_resolution,
+        effective_resolution=effective_resolution,
+        requested_esp_jpeg_quality=requested_quality,
+        effective_esp_jpeg_quality=effective_quality,
+        configured_buffer_bytes=configured_buffer,
+        dma_enabled=dma_enabled,
+        firmware_version=getattr(session_obj, "firmware_version", None),
+        jpeg_size_bytes=len(request.data),
+        jpeg_valid=True,
+        storage_key_original=storage_key,
+        upload_duration_ms=round((time.perf_counter() - started_at) * 1000),
+        confirmed_at=datetime.now(UTC),
         status="accepted",
     )
     db_session.add(frame)
@@ -365,6 +436,19 @@ async def upload_frame(
         raise
     await db_session.refresh(frame)
 
+    derivative = await persist_ocr_derivative(
+        storage=storage,
+        db_session=db_session,
+        session_id=request.session_id,
+        session_db_id=session_obj.id,
+        capture_id=request.capture_id,
+        frame_index=request.frame_index,
+        frame_id=frame.id,
+        original_storage_key=storage_key,
+        original_sha256=actual_sha256,
+        original_bytes=request.data,
+    )
+
     logger.info(
         "frame_uploaded",
         session_id=request.session_id,
@@ -373,10 +457,12 @@ async def upload_frame(
         sha256=actual_sha256,
         storage_key=storage_key,
         frame_id=str(frame.id),
+        derived_storage_key=derivative.storage_key,
     )
     return FrameUploadResult(
         frame_db_id=str(frame.id),
         storage_key=storage_key,
         sha256=actual_sha256,
         size_bytes=len(request.data),
+        derived_storage_key=derivative.storage_key,
     )

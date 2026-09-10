@@ -116,4 +116,46 @@ class SpoolDaoTest {
         val byUnique = dao.findByUniqueKey("S-x", "cap-x", 5, "d".repeat(64))
         assertNotNull(byUnique)
     }
+
+    @Test
+    fun `tres frames da mesma pagina consomem uma unidade de backpressure`() = runBlocking {
+        repeat(3) { index ->
+            dao.insert(
+                PendingFrame(
+                    sessionId = "S-page",
+                    captureId = "cap-page",
+                    frameIndex = index,
+                    sha256 = index.toString().padStart(64, 'a'),
+                    filePath = "/tmp/page-$index.jpg",
+                    resolution = "1280x720",
+                    orientation = 0,
+                    createdAt = 1000L + index,
+                )
+            )
+        }
+
+        assertEquals(3, dao.pendingPageFrameCount("S-page", "cap-page"))
+        assertEquals(1, dao.pendingPageCount())
+    }
+
+    @Test
+    fun `janela de dez paginas e medida por captura`() = runBlocking {
+        repeat(SpoolRepository.MAX_PENDING_PAGES) { page ->
+            dao.insert(
+                PendingFrame(
+                    sessionId = "S-window",
+                    captureId = "cap-$page",
+                    frameIndex = 0,
+                    sha256 = page.toString().padStart(64, 'b'),
+                    filePath = "/tmp/window-$page.jpg",
+                    resolution = "1280x720",
+                    orientation = 0,
+                    createdAt = 2000L + page,
+                )
+            )
+        }
+
+        assertEquals(SpoolRepository.MAX_PENDING_PAGES, dao.pendingPageCount())
+        assertEquals(1, dao.pendingPageFrameCount("S-window", "cap-0"))
+    }
 }

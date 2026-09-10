@@ -44,6 +44,7 @@ class SpoolRepository(
 ) {
     companion object {
         private const val TAG = "SpoolRepository"
+        const val MAX_PENDING_PAGES = 10
     }
 
     suspend fun save(frame: PendingFrame): Result<PendingFrame> = withContext(Dispatchers.IO) {
@@ -61,6 +62,18 @@ class SpoolRepository(
                     Log.e(TAG, msg)
                     return@withContext Result.failure(IllegalStateException(msg))
                 }
+            }
+
+            // Backpressure counts pages (session + capture), so a 1–3 frame
+            // page consumes one slot. A new page is rejected before the file
+            // is accepted when ten pages already await remote confirmation.
+            if (
+                dao.pendingPageFrameCount(frame.sessionId, frame.captureId) == 0 &&
+                dao.pendingPageCount() >= MAX_PENDING_PAGES
+            ) {
+                return@withContext Result.failure(
+                    IllegalStateException("Spool backpressure: $MAX_PENDING_PAGES pending pages")
+                )
             }
 
             // Verificar arquivo existe antes de inserir

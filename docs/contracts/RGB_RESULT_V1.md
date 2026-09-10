@@ -1,5 +1,7 @@
 # Contrato de resultado RGB V1
 
+> Consolidação de 09/09/2026: ler o [contrato de integração, revisão 1](INTEGRACAO_CONSOLIDADA_2026-09-09.md) para regras de durabilidade, cursores, cancelamento, IDs e perfil low-power. O formato binário e os vetores antigos deste documento permanecem válidos. Novos defaults devem ser explícitos e não alteram payloads já publicados. A ponte Android descrita abaixo é uma interface a implementar/validar; sua descrição não comprova funcionamento.
+
 Este contrato é o formato entregue pelo servidor ao Android Gateway para ser encaminhado ao firmware ESP32-S3 V2.2.
 
 O servidor usa `/api/v1/gateway/session/{session_id}/result`, `/rgb-sequence` e `/rgb-sequence/event`. O Android converte esses recursos para os endpoints locais `/v1/device/command`, `/v1/device/rgb-sequence` e `/v1/device/rgb-sequence/event`.

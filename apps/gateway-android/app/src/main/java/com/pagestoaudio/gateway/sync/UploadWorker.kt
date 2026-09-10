@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.pagestoaudio.gateway.GatewayApplication
+import com.pagestoaudio.gateway.diag.DiagCloudApi
 import com.pagestoaudio.gateway.network.ApiService
 import com.pagestoaudio.gateway.spool.AppDatabase
 import com.pagestoaudio.gateway.util.Sha256Util
@@ -80,6 +82,40 @@ class UploadWorker(
         if (computedSha != frame.sha256) {
             Log.e(TAG, "SHA mismatch! Room sha=${frame.sha256} computed=$computedSha id=${frame.id} — falha permanente")
             return Result.failure(errorData("sha mismatch room=${frame.sha256} computed=$computedSha"))
+        }
+
+        if (frame.sessionType == "DIAG") {
+            val app = applicationContext as? GatewayApplication
+                ?: return Result.failure(errorData("GatewayApplication unavailable for diagnostic upload"))
+            val diagnosticId = frame.sessionId.removePrefix("diag:")
+            return try {
+                val diagApi = DiagCloudApi(
+                    baseUrl = app.config.baseUrl,
+                    gatewayId = app.config.gatewayId ?: app.config.deviceId,
+                    bearer = { app.config.gatewaySecret ?: app.config.deviceSecret ?: "" },
+                    client = app.okHttpClient,
+                )
+                val ack = diagApi.uploadFrame(
+                    diagnosticId = diagnosticId,
+                    frameIndex = frame.frameIndex,
+                    sha = frame.sha256,
+                    file = file,
+                    capturedMonoMs = frame.createdAt,
+                    width = frame.width,
+                    height = frame.height,
+                )
+                if (!ack.accepted) {
+                    dao.incrementAttempts(frame.id)
+                    return Result.retry()
+                }
+                dao.markAck(frame.id)
+                if (file.exists()) file.delete()
+                Result.success()
+            } catch (e: Exception) {
+                Log.w(TAG, "Upload diagnóstico falhou id=${frame.id} — retry", e)
+                dao.incrementAttempts(frame.id)
+                Result.retry()
+            }
         }
 
         val api = apiService ?: run {
